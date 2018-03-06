@@ -3,11 +3,14 @@ import os,time,cv2
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
 import numpy as np
+import numpy
 import random
 import argparse_util
 import pickle
+from tensorflow.python.client import timeline
 
 allowed_dtypes = ['float64', 'float32', 'uint8']
+no_L1_reg_other_layers = True
 
 def lrelu(x):
     return tf.maximum(x*0.2,x)
@@ -29,7 +32,7 @@ def nm(x):
 conv_channel = 24
 def build(input, ini_id=True, regularizer_scale=0.0):
     regularizer = None
-    if regularizer_scale > 0.0:
+    if not no_L1_reg_other_layers and regularizer_scale > 0.0:
         regularizer = slim.l1_regularizer(regularizer_scale)
     if ini_id:
         net=slim.conv2d(input,conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv1',weights_regularizer=regularizer)
@@ -143,7 +146,8 @@ def main():
     parser.add_argument('--is_bin', dest='is_bin', action='store_true', help='whether input is stored in bin files')
     parser.add_argument('--upsample_scale', dest='upsample_scale', type=int, default=1, help='the scale to upsample input, must be power of 2')
     parser.add_argument('--upsample_single', dest='upsample_single', action='store_true', help='if set, upsample each channel seperately')
-    parser.add_argument('--regularizer_scale', dest='regularizer_scale', type=float, default=0.0, help='scale for L1 regularizer')
+    parser.add_argument('--L1_regularizer_scale', dest='regularizer_scale', type=float, default=0.0, help='scale for L1 regularizer')
+    parser.add_argument('--L2_regularizer_scale', dest='L2_regularizer_scale', type=float, default=0.0, help='scale for L2 regularizer')
     parser.add_argument('--upsample_shrink_feature', dest='upsample_shrink_feature', action='store_true', help="deconv layer's output channel is the shrinked")
     parser.add_argument('--clip_weights', dest='clip_weights', type=float, default=-1.0, help='abs value for clipping weights')
     parser.add_argument('--test_training', dest='test_training', action='store_true', help='use training data for testing purpose')
@@ -151,8 +155,17 @@ def main():
     parser.add_argument('--input_h', dest='input_h', type=int, default=640, help='supplemental information needed when using queue to read binary file')
     parser.add_argument('--no_deconv', dest='deconv', action='store_false', help='use image resize to upsample')
     parser.add_argument('--share_weights', dest='share_weights', action='store_true', help='share weights beetween samples')
-    parser.add_argument('--clip_weights_percentage', dest='clip_weights_percentage', type=float, default=0.0, help='clip weights according to given percentage')
+    parser.add_argument('--naive_clip_weights_percentage', dest='clip_weights_percentage', type=float, default=0.0, help='clip weights according to given percentage')
     parser.add_argument('--which_epoch', dest='which_epoch', type=int, default=0, help='decide which epoch to read the checkpoint')
+    parser.add_argument('--generate_timeline', dest='generate_timeline', action='store_true', help='generate timeline files')
+    parser.add_argument('--encourage_sparse_features', dest='encourage_sparse_features', action='store_true', help='if true, encourage selecting sparse number of features')
+    parser.add_argument('--collect_validate_loss', dest='collect_validate_loss', action='store_true', help='if true, collect validation loss (and training score) and write to tensorboard')
+    parser.add_argument('--collect_validate_while_training', dest='collect_validate_while_training', action='store_true', help='if true, collect validation loss while training')
+    parser.add_argument('--clip_weights_percentage_after_normalize', dest='clip_weights_percentage_after_normalize', type=float, default=0.0, help='clip weights after being normalized in feature selection layer')
+    parser.add_argument('--no_normalize', dest='normalize_weights', action='store_false', help='if specified, does not normalize weight on feature selection layer')
+    parser.add_argument('--abs_normalize', dest='abs_normalize', action='store_true', help='when specified, use sum of abs values as normalization')
+    parser.add_argument('--rowwise_L2_normalize', dest='rowwise_L2_normalize', action='store_true', help='when specified, normalize feature selection matrix by divide row-wise L2 norm sum, then regularize the resulting matrix with L1')
+    parser.add_argument('--Frobenius_normalize', dest='Frobenius_normalize', action='store_true', help='when specified, use Frobenius norm to normalize feature selecton matrix, followed by L1 regularization')
     
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -167,6 +180,14 @@ def main():
     parser.set_defaults(test_training=False)
     parser.set_defaults(deconv=True)
     parser.set_defaults(share_weights=False)
+    parser.set_defaults(generate_timeline=False)
+    parser.set_defaults(encourage_sparse_features=False)
+    parser.set_defaults(collect_validate_loss=False)
+    parser.set_defaults(collect_validate_while_training=False)
+    parser.set_defaults(normalize_weights=True)
+    parser.set_defaults(abs_normalize=False)
+    parser.set_defaults(rowwise_L2_normalize=False)
+    parser.set_defaults(Frobenius_normalize=False)
     
     args = parser.parse_args()
     
@@ -190,33 +211,47 @@ def main():
         val_names = input_names
         val_img_names = output_names
         
-    is_train = tf.placeholder(tf.bool)
+    #is_train = tf.placeholder(tf.bool)
         
     if not args.use_queue:
         input=tf.placeholder(tf.float32,shape=[None,None,None,args.input_nc])
         output=tf.placeholder(tf.float32,shape=[None,None,None,3]) 
     else:
         if not args.use_batch:
-            input_tensor_train = tf.convert_to_tensor(input_names)
-            output_tensor_train = tf.convert_to_tensor(output_names)
-            input_queue_train, output_queue_train = tf.train.slice_input_producer([input_tensor_train, output_tensor_train], shuffle=True, num_epochs=10*args.epoch)
-
-            input_tensor_test = tf.convert_to_tensor(val_names)
-            output_tensor_test = tf.convert_to_tensor(val_img_names)
-            input_queue_test, output_queue_test = tf.train.slice_input_producer([input_tensor_test, output_tensor_test], shuffle=False, num_epochs=10*args.epoch)
-            
-            input_queue = tf.cond(is_train, lambda: input_queue_train, lambda: input_queue_test)
-            output_queue = tf.cond(is_train, lambda: output_queue_train, lambda: output_queue_test)
+            if args.is_train:
+                input_tensor = tf.convert_to_tensor(input_names)
+                output_tensor = tf.convert_to_tensor(output_names)
+                is_shuffle = True
+            else:
+                input_tensor = tf.convert_to_tensor(val_names)
+                output_tensor = tf.convert_to_tensor(val_img_names)
+                is_shuffle = False
+                
+            input_queue, output_queue = tf.train.slice_input_producer([input_tensor, output_tensor], shuffle=is_shuffle, capacity=200)
             
             input = tf.decode_raw(tf.read_file(input_queue), tf.float32)
+            
             input = tf.reshape(input, (args.input_h, args.input_w, args.input_nc))
-            output = tf.to_float(tf.image.decode_png(tf.read_file(output_queue))) / 255.0
-            if args.share_weights:
-                input = tf.reshape(input, (args.input_h, args.input_w, args.nsamples, nfeatures))
-                input = tf.transpose(input, perm=[2, 0, 1, 3])
+            output = tf.to_float(tf.image.decode_image(tf.read_file(output_queue), channels=3)) / 255.0
+            output.set_shape((args.input_h, args.input_w, 3))
+            
+            print("start batch")
+            if args.is_train:
+                input, output = tf.train.batch([input, output], 1, num_threads=10, capacity=20)
             else:
                 input = tf.expand_dims(input, axis=0)
-            output = tf.expand_dims(output, axis=0)
+                output = tf.expand_dims(output, axis=0)
+            print("end batch")
+
+            #input = tf.expand_dims(input, 0)
+            #output = tf.expand_dims(output, 0)
+            
+            #if args.share_weights:
+            #    input = tf.reshape(input, (args.input_h, args.input_w, args.nsamples, nfeatures))
+            #    input = tf.transpose(input, perm=[2, 0, 1, 3])
+            #else:
+            #    input = tf.expand_dims(input, axis=0)
+            #output = tf.expand_dims(output, axis=0)
         # TODO: finish logic when using batch queues
         else:
             raise
@@ -241,22 +276,60 @@ def main():
                 input_stacks.append(input[:, :, :, i] * alpha)
         input_to_network = tf.stack(input_stacks, axis=3)
         
+    if args.clip_weights_percentage_after_normalize > 0.0:
+        assert args.encourage_sparse_features
+        assert not args.is_train
+    
+        replace_normalize_weights = tf.placeholder(tf.bool)
+        normalize_weights = tf.placeholder(tf.float32,shape=[1, 1, args.input_nc, conv_channel])
+    else:
+        replace_normalize_weights = None
+        normalize_weights = None
+    
+    regularizer_loss = 0
+    manual_regularize = args.rowwise_L2_normalize or args.Frobenius_normalize
+    if args.encourage_sparse_features:
+        regularizer = None
+        if (args.regularizer_scale > 0 or args.L2_regularizer_scale > 0) and not manual_regularize:
+            regularizer = slim.l1_l2_regularizer(scale_l1=args.regularizer_scale, scale_l2=args.L2_regularizer_scale)
+        with tf.variable_scope("feature_reduction"):
+            weights = tf.get_variable('w0', [1, 1, args.input_nc, conv_channel], initializer=tf.contrib.layers.xavier_initializer(), regularizer=regularizer)
+            if args.normalize_weights:
+                if args.abs_normalize:
+                    column_sum = tf.reduce_sum(tf.abs(weights), [0, 1, 2])
+                elif args.rowwise_L2_normalize:
+                    column_sum = tf.reduce_sum(tf.abs(tf.square(weights)), [0, 1, 2])
+                elif args.Frobenius_normalize:
+                    column_sum = tf.reduce_sum(tf.abs(tf.square(weights)))
+                else:
+                    column_sum = tf.reduce_sum(weights, [0, 1, 2])
+                weights_to_input = weights / column_sum
+                if args.clip_weights_percentage_after_normalize:
+                    weights_to_input = tf.cond(replace_normalize_weights, lambda: normalize_weights, lambda: weights_to_input)
+            else:
+                weights_to_input = weights
+                
+            input_to_network = tf.nn.conv2d(input_to_network, weights_to_input, [1, 1, 1, 1], "SAME")
+            if manual_regularize:
+                regularizer_loss = args.regularizer_scale * tf.reduce_mean(tf.abs(weights_to_input))
+            ini_id = True
+        
     if deconv_layers > 0:
         if args.deconv:
             regularizer = None
-            if args.regularizer_scale > 0.0:
+            if not no_L1_reg_other_layers and args.regularizer_scale > 0.0:
                 regularizer = slim.l1_regularizer(args.regularizer_scale)
+            out_feature = args.input_nc if not args.encourage_sparse_features else conv_channel
             if not args.upsample_single:
                 if args.upsample_shrink_feature:
+                    assert not args.encourage_sparse_features
                     out_feature = min(args.input_nc, conv_channel)
                     ini_id = True
-                else:
-                    out_feature = args.input_nc
                 for i in range(deconv_layers):
                     input_to_network = slim.conv2d_transpose(input_to_network, out_feature, 3, stride=2, weights_initializer=identity_initializer(), scope='deconv'+str(i+1), weights_regularizer=regularizer)
             else:
                 upsample_stacks = []
-                for c in range(args.input_nc):
+                for c in range(out_feature):
                     current_channel = tf.expand_dims(input_to_network[:, :, :, c], axis=3)
                     for i in range(deconv_layers):
                         current_channel = slim.conv2d_transpose(current_channel, 1, 3, stride=2, weights_initializer=identity_initializer(), scope='deconv'+str(c+1)+str(i+1), weights_regularizer=regularizer)
@@ -281,20 +354,34 @@ def main():
     tf.summary.scalar('avg_test_middle', avg_test_middle)
     avg_test_all = 0
     tf.summary.scalar('avg_test_all', avg_test_all)
+    reg_loss = 0
+    tf.summary.scalar('reg_loss', reg_loss)
+    
+    loss_to_opt = loss + regularizer_loss
 
-    opt=tf.train.AdamOptimizer(learning_rate=0.0001).minimize(loss,var_list=[var for var in tf.trainable_variables()])
+    opt=tf.train.AdamOptimizer(learning_rate=0.0001).minimize(loss_to_opt,var_list=[var for var in tf.trainable_variables()])
 
     saver=tf.train.Saver(max_to_keep=1000)
     
+    print("start sess")
+    #sess = tf.Session(config=tf.ConfigProto(inter_op_parallelism_threads=10, intra_op_parallelism_threads=3))
     sess = tf.Session()
+    print("after start sess")
     merged = tf.summary.merge_all()
     train_writer = tf.summary.FileWriter(args.name, sess.graph)
+    print("initialize local vars")
+    sess.run(tf.local_variables_initializer())
+    print("initialize global vars")
     sess.run(tf.global_variables_initializer())
-    tf.local_variables_initializer().run(session=sess)
     
     if args.use_queue:
+        print("start coord")
         coord = tf.train.Coordinator()
+        print("start queue")
         threads = tf.train.start_queue_runners(coord=coord, sess=sess)
+        print("start sleep")
+        time.sleep(30)
+        print("after sleep")
 
     read_from_epoch = True
     ckpt = tf.train.get_checkpoint_state(os.path.join(args.name, "%04d"%int(args.which_epoch)))
@@ -305,6 +392,7 @@ def main():
     if ckpt:
         print('loaded '+ckpt.model_checkpoint_path)
         saver.restore(sess,ckpt.model_checkpoint_path)
+        print('finished loading')
     elif args.finetune:
         ckpt_orig = tf.train.get_checkpoint_state(args.orig_name)
         if ckpt_orig:
@@ -331,9 +419,9 @@ def main():
                             current_init_val[:, :, orig_channel[c] + n * nfeatures, :] = orig_val[:, :, c, :] / args.nsamples
                     sess.run(tf.assign(var_gconv1, current_init_val))
 
-    save_frequency = 10
+    save_frequency = 1
     num_epoch = args.epoch
-    assert num_epoch % save_frequency == 0
+    #assert num_epoch % save_frequency == 0
     
     def read_ind(img_arr, name_arr, id, is_npy):
         img_arr[id] = read_name(name_arr[id], is_npy)
@@ -374,6 +462,8 @@ def main():
             read_ind(eval_out_images, val_img_names, id, False)
             eval_out_images[id] = np.expand_dims(eval_out_images[id], axis=0)
         
+    print("arriving before train branch")
+    
     if args.is_train:
         all=np.zeros(len(input_names), dtype=float)
         
@@ -399,6 +489,7 @@ def main():
         #num_transition_epoch = 50
         num_transition_epoch = 20
         alpha_schedule = np.logspace(alpha_start, alpha_end, num_transition_epoch)
+        printval = False
                 
         for epoch in range(1, num_epoch+1):
 
@@ -450,47 +541,58 @@ def main():
                             raise
                     _,current=sess.run([opt,loss],feed_dict={input:input_image,output:output_image, alpha: alpha_val}, options=run_options, run_metadata=run_metadata)
                 else:
-                    _,current=sess.run([opt,loss],feed_dict={alpha: alpha_val, is_train: True}, options=run_options, run_metadata=run_metadata)
+                    if not printval:
+                        print("first time arriving before sess, wish me best luck")
+                        printval = True
+                    _,current=sess.run([opt,loss],feed_dict={alpha: alpha_val}, options=run_options, run_metadata=run_metadata)
+                if run_metadata is not None and args.generate_timeline:
+                    fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+                    chrome_trace = fetched_timeline.generate_chrome_trace_format()
+                    with open("%s/epoch%04d_step%d.json"%(args.name,epoch, i), 'w') as f:
+                        f.write(chrome_trace)
                 #_,current=sess.run([opt,loss],feed_dict={input:input_image,output:output_image, alpha: alpha_val})
                 all[permutation[start_id:end_id]]=current*255.0*255.0
                 cnt += args.batch_size if args.use_batch else 1
                 print("%d %d %.2f %.2f %.2f %s"%(epoch,cnt,current*255.0*255.0,np.mean(all[np.where(all)]),time.time()-st,os.getcwd().split('/')[-2]))
             
             avg_loss = np.mean(all[np.where(all)])
-            #av = sess.run(tf.constant(avg_loss))
-            #train_writer.add_summary(av, epoch)
-            
-            all_test=np.zeros(len(val_names), dtype=float)
-            for ind in range(len(val_names)):
-                if not args.use_queue:
-                    if args.preload:
-                        input_image = eval_images[ind]
-                        output_image = eval_out_images[ind]
-                    else:
-                        input_image = np.expand_dims(read_name(val_names[ind], args.is_npy, args.is_bin), axis=0)
-                        output_image = np.expand_dims(read_name(val_names[ind], False, False), axis=0)
-                    if input_image is None:
-                        continue
-                    st=time.time()
-                    current=sess.run(loss,feed_dict={input:input_image, output: output_image, alpha: alpha_val})
-                    print("%.3f"%(time.time()-st))
-                else:
-                    st=time.time()
-                    current=sess.run(loss,feed_dict={alpha: alpha_val, is_train: False})
-                    print("%.3f"%(time.time()-st))
-                all_test[ind] = current * 255.0 * 255.0
-            
-            avg_test_close = np.mean(all_test[:5])
-            avg_test_far = np.mean(all_test[5:10])
-            avg_test_middle = np.mean(all_test[10:])
-            avg_test_all = np.mean(all_test)
             
             summary = tf.Summary()
             summary.value.add(tag='avg_loss', simple_value=avg_loss)
-            summary.value.add(tag='avg_test_close', simple_value=avg_test_close)
-            summary.value.add(tag='avg_test_far', simple_value=avg_test_far)
-            summary.value.add(tag='avg_test_middle', simple_value=avg_test_middle)
-            summary.value.add(tag='avg_test_all', simple_value=avg_test_all)
+            summary.value.add(tag='reg_loss', simple_value=sess.run(regularizer_loss) / args.regularizer_scale)
+            
+            
+            if args.collect_validate_while_training:
+                all_test=np.zeros(len(val_names), dtype=float)
+                for ind in range(len(val_names)):
+                    if not args.use_queue:
+                        if args.preload:
+                            input_image = eval_images[ind]
+                            output_image = eval_out_images[ind]
+                        else:
+                            input_image = np.expand_dims(read_name(val_names[ind], args.is_npy, args.is_bin), axis=0)
+                            output_image = np.expand_dims(read_name(val_names[ind], False, False), axis=0)
+                        if input_image is None:
+                            continue
+                        st=time.time()
+                        current=sess.run(loss,feed_dict={input:input_image, output: output_image, alpha: alpha_val})
+                        print("%.3f"%(time.time()-st))
+                    else:
+                        st=time.time()
+                        current=sess.run(loss,feed_dict={alpha: alpha_val})
+                        print("%.3f"%(time.time()-st))
+                    all_test[ind] = current * 255.0 * 255.0
+                
+                avg_test_close = np.mean(all_test[:5])
+                avg_test_far = np.mean(all_test[5:10])
+                avg_test_middle = np.mean(all_test[10:])
+                avg_test_all = np.mean(all_test)
+
+                summary.value.add(tag='avg_test_close', simple_value=avg_test_close)
+                summary.value.add(tag='avg_test_far', simple_value=avg_test_far)
+                summary.value.add(tag='avg_test_middle', simple_value=avg_test_middle)
+                summary.value.add(tag='avg_test_all', simple_value=avg_test_all)
+                
             train_writer.add_run_metadata(run_metadata, 'epoch%d' % epoch)
             train_writer.add_summary(summary, epoch)
                 
@@ -500,105 +602,202 @@ def main():
                 target.write("%f"%np.mean(all[np.where(all)]))
                 target.close()
                 
-                target = open("%s/%04d/score_breakdown.txt"%(args.name,epoch),'w')
-                target.write("%f, %f, %f, %f"%(avg_test_close, avg_test_far, avg_test_middle, avg_test_all))
-                target.close()
+                #target = open("%s/%04d/score_breakdown.txt"%(args.name,epoch),'w')
+                #target.write("%f, %f, %f, %f"%(avg_test_close, avg_test_far, avg_test_middle, avg_test_all))
+                #target.close()
                 
                 saver.save(sess,"%s/model.ckpt"%args.name)
                 saver.save(sess,"%s/%04d/model.ckpt"%(args.name,epoch))
-    
-    test_dirbase = 'train' if args.test_training else 'test'
-    if args.clip_weights > 0:
-        test_dirname = "%s/%s_abs%s"%(args.name, test_dirbase, str(args.clip_weights).replace('.', ''))
-    elif args.clip_weights_percentage > 0:
-        test_dirname = "%s/%s_pct%s"%(args.name, test_dirbase, str(args.clip_weights_percentage).replace('.', ''))
-    else:
-        test_dirname = "%s/%s"%(args.name, test_dirbase)
-        
-    if read_from_epoch and not args.is_train:
-        test_dirname += "_epoch_%04d"%args.which_epoch
-    
-    if not os.path.isdir(test_dirname):
-        os.makedirs(test_dirname)
-    
-    if args.clip_weights > 0:
-        var_all = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
-        count_zero = 0
-        count_all = 0
-        for var in var_all:
-            if 'weights' in var.name:
-                weights_val = sess.run(var)
-                inds = abs(weights_val) < args.clip_weights
-                weights_val[inds] = 0
-                count_zero += np.sum(inds)
-                count_all += weights_val.size
-                sess.run(tf.assign(var, weights_val))
-        clip_percent = count_zero / count_all * 100
-        target = open(os.path.join(test_dirname, 'clip_info.txt'), 'w')
-        target.write("""
-threshold: {args.clip_weights}
-clipped_weights: {count_zero} / {count_all}
-percentage: {clip_percent}%""".format(**locals()))  
-        target.close()
-    elif args.clip_weights_percentage > 0:
-        all_weights = np.empty(0)
-        var_all = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
-        for var in var_all:
-            if 'weights' in var.name:
-                weights_val = sess.run(var)
-                all_weights = np.concatenate((all_weights, np.absolute(weights_val.reshape(weights_val.size))))
                 
-        percentile = np.percentile(all_weights, args.clip_weights_percentage)
-        for var in var_all:
-            if 'weights' in var.name:
-                weights_val = sess.run(var)
-                weights_val[abs(weights_val) < percentile] = 0
-                sess.run(tf.assign(var, weights_val))
-            
-        target = open(os.path.join(test_dirname, 'clip_info.txt'), 'w')
-        target.write("""
-percentage: {args.clip_weights_percentage}%
-percentile value: {percentile}""".format(**locals()))
+        var_list_gconv1 = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='g_conv1')
+        g_conv1_dict = {}
+        for var_gconv1 in var_list_gconv1:
+            g_conv1_dict[var_gconv1.name] = sess.run(var_gconv1)
+        save_obj(g_conv1_dict, "%s/g_conv1.pkl"%(args.name))
     
-    all_test=np.zeros(len(val_names), dtype=float)
-    for ind in range(len(val_names)):
-        if not args.use_queue:
-            if args.preload:
-                input_image = eval_images[ind]
-                output_image = eval_out_images[ind]
-            else:
-                input_image = np.expand_dims(read_name(val_names[ind], args.is_npy, args.is_bin), axis=0)
-                output_image = np.expand_dims(read_name(val_names[ind], False, False), axis=0)
-            if input_image is None:
-                continue
-            st=time.time()
-            output_image, current=sess.run([network, loss],feed_dict={input:input_image, output: output_image, alpha: alpha_val})
+    if not args.is_train:
+    
+        if args.collect_validate_loss:
+            assert not args.test_training
+            dirs = sorted(os.listdir(args.name))
+            for dir in dirs:
+                success = False
+                try:
+                    epoch = int(dir)
+                    success = True
+                except:
+                    pass
+                if not success:
+                    continue
+                
+                
+                ckpt = tf.train.get_checkpoint_state(os.path.join(args.name, dir))
+                print('loaded '+ckpt.model_checkpoint_path)
+                saver.restore(sess,ckpt.model_checkpoint_path)
+                
+                avg_loss = float(open(os.path.join(args.name, dir, 'score.txt')).read())
+                all_test = np.zeros(len(val_names), dtype=float)
+                for ind in range(len(val_names)):
+                    if not args.use_queue:
+                        if args.preload:
+                            input_image = eval_images[ind]
+                            output_image = eval_out_images[ind]
+                        else:
+                            input_image = np.expand_dims(read_name(val_names[ind], args.is_npy, args.is_bin), axis=0)
+                            output_image = np.expand_dims(read_name(val_img_names[ind], False, False), axis=0)
+                        if input_image is None:
+                            continue
+                        st=time.time()
+                        current=sess.run(loss,feed_dict={input:input_image, output: output_image, alpha: alpha_val})
+                        print("%.3f"%(time.time()-st))
+                    else:
+                        st=time.time()
+                        current=sess.run(loss,feed_dict={alpha: alpha_val})
+                        print("%.3f"%(time.time()-st))
+                    all_test[ind] = current * 255.0 * 255.0
+                
+                avg_test_close = np.mean(all_test[:5])
+                avg_test_far = np.mean(all_test[5:10])
+                avg_test_middle = np.mean(all_test[10:])
+                avg_test_all = np.mean(all_test)
+                
+                summary = tf.Summary()
+                summary.value.add(tag='avg_loss', simple_value=avg_loss)
+                summary.value.add(tag='avg_test_close', simple_value=avg_test_close)
+                summary.value.add(tag='avg_test_far', simple_value=avg_test_far)
+                summary.value.add(tag='avg_test_middle', simple_value=avg_test_middle)
+                summary.value.add(tag='avg_test_all', simple_value=avg_test_all)
+                train_writer.add_summary(summary, epoch)
+    
+        test_dirbase = 'train' if args.test_training else 'test'
+        if args.clip_weights > 0:
+            test_dirname = "%s/%s_abs%s"%(args.name, test_dirbase, str(args.clip_weights).replace('.', ''))
+        elif args.clip_weights_percentage > 0:
+            test_dirname = "%s/%s_pct%s"%(args.name, test_dirbase, str(args.clip_weights_percentage).replace('.', ''))
+        elif args.clip_weights_percentage_after_normalize > 0:
+            test_dirname = "%s/%s_pct_norm%s"%(args.name, test_dirbase, str(args.clip_weights_percentage_after_normalize).replace('.', ''))
         else:
-            st=time.time()
-            output_image, current=sess.run([network, loss],feed_dict={alpha: alpha_val, is_train: False})
-        print("%.3f"%(time.time()-st))
-        all_test[ind] = current * 255.0 * 255.0
-        output_image=np.minimum(np.maximum(output_image,0.0),1.0)*255.0
-        if args.use_queue:
-            output_image = output_image[:, :, :, ::-1]
-        cv2.imwrite("%s/%06d.png"%(test_dirname, ind+1),np.uint8(output_image[0,:,:,:]))
-    
-    target=open(os.path.join(test_dirname, 'score.txt'),'w')
-    target.write("%f"%np.mean(all_test[np.where(all_test)]))  
-    target.close()
-    if len(val_names) == 30:
-        score_close = np.mean(all_test[:5])
-        score_far = np.mean(all_test[5:10])
-        score_middle = np.mean(all_test[10:])
-        target=open(os.path.join(test_dirname, 'score_breakdown.txt'),'w')
-        target.write("%f, %f, %f"%(score_close, score_far, score_middle))  
-        target.close()
+            test_dirname = "%s/%s"%(args.name, test_dirbase)
+            
+        if read_from_epoch and not args.is_train:
+            test_dirname += "_epoch_%04d"%args.which_epoch
         
-    var_list_gconv1 = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='g_conv1')
-    g_conv1_dict = {}
-    for var_gconv1 in var_list_gconv1:
-        g_conv1_dict[var_gconv1.name] = sess.run(var_gconv1)
-    save_obj(g_conv1_dict, "%s/g_conv1.pkl"%(args.name))
+        if not os.path.isdir(test_dirname):
+            os.makedirs(test_dirname)
+        
+        if args.clip_weights > 0:
+            var_all = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
+            count_zero = 0
+            count_all = 0
+            for var in var_all:
+                if args.encourage_sparse_features:
+                    success = 'w0' in var.name and 'feature_reduction' in var.name
+                else:
+                    success = 'weights' in var.name
+                success = success and 'Adam' not in var.name
+                if success:
+                    weights_val = sess.run(var)
+                    inds = abs(weights_val) < args.clip_weights
+                    weights_val[inds] = 0
+                    count_zero += np.sum(inds)
+                    count_all += weights_val.size
+                    sess.run(tf.assign(var, weights_val))
+            clip_percent = count_zero / count_all * 100
+            target = open(os.path.join(test_dirname, 'clip_info.txt'), 'w')
+            target.write("""
+    threshold: {args.clip_weights}
+    clipped_weights: {count_zero} / {count_all}
+    percentage: {clip_percent}%""".format(**locals()))  
+            target.close()
+        elif args.clip_weights_percentage > 0:
+            all_weights = np.empty(0)
+            var_all = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
+            for var in var_all:
+                if args.encourage_sparse_features:
+                    success = 'w0' in var.name and 'feature_reduction' in var.name
+                else:
+                    success = 'weights' in var.name
+                success = success and 'Adam' not in var.name
+                if success:
+                    weights_val = sess.run(var)
+                    all_weights = np.concatenate((all_weights, np.absolute(weights_val.reshape(weights_val.size))))
+                    
+            percentile = np.percentile(abs(all_weights), args.clip_weights_percentage)
+            for var in var_all:
+                if args.encourage_sparse_features:
+                    success = 'w0' in var.name and 'feature_reduction' in var.name
+                else:
+                    success = 'weights' in var.name
+                success = success and 'Adam' not in var.name
+                if success:
+                    weights_val = sess.run(var)
+                    weights_val[abs(weights_val) < percentile] = 0
+                    sess.run(tf.assign(var, weights_val))
+            total_num_weights = all_weights.shape[0]    
+            target = open(os.path.join(test_dirname, 'clip_info.txt'), 'w')
+            target.write("""
+    percentage: {args.clip_weights_percentage}%
+    percentile value: {percentile}
+    total number of weights: {total_num_weights}""".format(**locals()))
+            target.close()
+        elif args.clip_weights_percentage_after_normalize > 0.0:
+                weights_val = sess.run(weights_to_input, feed_dict={replace_normalize_weights: False, normalize_weights: np.empty((1, 1, args.input_nc, conv_channel))})
+                percentile = np.percentile(abs(weights_val), args.clip_weights_percentage_after_normalize)
+                weights_val[abs(weights_val) < percentile] = 0
+                elements_left_per_row = numpy.sum((weights_val != 0), (0, 1, 2))
+                numpy.savetxt(os.path.join(test_dirname, 'weights_statistic.txt'), elements_left_per_row, '%d', delimiter=',    ', newline=',    \n')
+                #numpy.save(os.path.join(test_dirname, 'weights_val.npy'), weights_val)
+                target = open(os.path.join(test_dirname, 'clip_info.txt'), 'w')
+                target.write("""
+    percentage: {args.clip_weights_percentage_after_normalize}%
+    percentile value after normalize: {percentile}""".format(**locals()))
+                target.close()
+        
+        all_test=np.zeros(len(val_names), dtype=float)
+        for ind in range(len(val_names)):
+            feed_dict = {alpha: alpha_val}
+            if not args.use_queue:
+                if args.preload:
+                    input_image = eval_images[ind]
+                    output_image = eval_out_images[ind]
+                else:
+                    input_image = np.expand_dims(read_name(val_names[ind], args.is_npy, args.is_bin), axis=0)
+                    output_image = np.expand_dims(read_name(val_img_names[ind], False, False), axis=0)
+                if input_image is None:
+                    continue
+                st=time.time()
+                feed_dict[input] = input_image
+                feed_dict[output] = output_image
+                #output_image, current=sess.run([network, loss],feed_dict={input:input_image, output: output_image, alpha: alpha_val})
+            else:
+                st=time.time()
+                #output_image, current=sess.run([network, loss],feed_dict={alpha: alpha_val})
+            if args.clip_weights_percentage_after_normalize > 0:
+                feed_dict[replace_normalize_weights] = True
+                feed_dict[normalize_weights] = weights_val
+            output_image, current, debug_val=sess.run([network, loss, input_queue],feed_dict=feed_dict)
+            print(debug_val)
+            print("%.3f"%(time.time()-st))
+            all_test[ind] = current * 255.0 * 255.0
+            output_image=np.minimum(np.maximum(output_image,0.0),1.0)*255.0
+            if args.use_queue:
+                output_image = output_image[:, :, :, ::-1]
+            cv2.imwrite("%s/%06d.png"%(test_dirname, ind+1),np.uint8(output_image[0,:,:,:]))
+        
+        target=open(os.path.join(test_dirname, 'score.txt'),'w')
+        target.write("%f"%np.mean(all_test[np.where(all_test)]))  
+        target.close()
+        if len(val_names) == 30:
+            score_close = np.mean(all_test[:5])
+            score_far = np.mean(all_test[5:10])
+            score_middle = np.mean(all_test[10:])
+            target=open(os.path.join(test_dirname, 'score_breakdown.txt'),'w')
+            target.write("%f, %f, %f"%(score_close, score_far, score_middle))  
+            target.close()
+            
+    coord.request_stop()
+    coord.join(threads)
+    sess.close()
             
 if __name__ == '__main__':
     main()
