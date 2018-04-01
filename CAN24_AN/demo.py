@@ -8,6 +8,7 @@ import random
 import argparse_util
 import pickle
 from tensorflow.python.client import timeline
+import copy
 
 allowed_dtypes = ['float64', 'float32', 'uint8']
 no_L1_reg_other_layers = True
@@ -30,22 +31,41 @@ def nm(x):
     return w0*x+w1*slim.batch_norm(x) # the parameter "is_training" in slim.batch_norm does not seem to help so I do not use it
 
 conv_channel = 24
-def build(input, ini_id=True, regularizer_scale=0.0):
+actual_conv_channel = conv_channel
+
+dilation_remove_large = False
+dilation_clamp_large = False
+dilation_threshold = 8
+
+def build(input, ini_id=True, regularizer_scale=0.0, share_weights=False, final_layer_channels=-1):
     regularizer = None
     if not no_L1_reg_other_layers and regularizer_scale > 0.0:
         regularizer = slim.l1_regularizer(regularizer_scale)
     if ini_id:
-        net=slim.conv2d(input,conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv1',weights_regularizer=regularizer)
+        net=slim.conv2d(input,actual_conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv1',weights_regularizer=regularizer)
     else:
-        net=slim.conv2d(input,conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,scope='g_conv1',weights_regularizer=regularizer)
-    net=slim.conv2d(net,conv_channel,[3,3],rate=2,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv2',weights_regularizer=regularizer)
-    net=slim.conv2d(net,conv_channel,[3,3],rate=4,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv3',weights_regularizer=regularizer)
-    net=slim.conv2d(net,conv_channel,[3,3],rate=8,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv4',weights_regularizer=regularizer)
-    net=slim.conv2d(net,conv_channel,[3,3],rate=16,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv5',weights_regularizer=regularizer)
-    net=slim.conv2d(net,conv_channel,[3,3],rate=32,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv6',weights_regularizer=regularizer)
-    net=slim.conv2d(net,conv_channel,[3,3],rate=64,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv7',weights_regularizer=regularizer)
+        net=slim.conv2d(input,actual_conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,scope='g_conv1',weights_regularizer=regularizer)
+    
+    dilation_schedule = [2, 4, 8, 16, 32, 64]
+    for ind in range(len(dilation_schedule)):
+        dilation_rate = dilation_schedule[ind]
+        conv_ind = ind + 2
+        if dilation_rate > dilation_threshold:
+            if dilation_remove_large:
+                dilation_rate = 1
+            elif dilation_clamp_large:
+                dilation_rate = dilation_threshold
+        print('rate is', dilation_rate)
+        net=slim.conv2d(net,actual_conv_channel,[3,3],rate=dilation_rate,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv'+str(conv_ind),weights_regularizer=regularizer)
 #    net=slim.conv2d(net,24,[3,3],rate=128,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv8')
-    net=slim.conv2d(net,conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv9',weights_regularizer=regularizer)
+
+    net=slim.conv2d(net,actual_conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv9',weights_regularizer=regularizer)
+    if final_layer_channels > 0:
+        for nlayer in range(3):
+            net = slim.conv2d(net, final_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(), scope='final_'+str(nlayer),weights_regularizer=regularizer)
+
+    if share_weights:
+        net = tf.expand_dims(tf.reduce_mean(net, 0), 0)
     net=slim.conv2d(net,3,[1,1],rate=1,activation_fn=None,scope='g_conv_last',weights_regularizer=regularizer)
     return net
 
@@ -154,11 +174,12 @@ def main():
     parser.add_argument('--input_w', dest='input_w', type=int, default=960, help='supplemental information needed when using queue to read binary file')
     parser.add_argument('--input_h', dest='input_h', type=int, default=640, help='supplemental information needed when using queue to read binary file')
     parser.add_argument('--no_deconv', dest='deconv', action='store_false', help='use image resize to upsample')
+    parser.add_argument('--deconv', dest='deconv', action='store_true', help='use deconv to upsample')
     parser.add_argument('--share_weights', dest='share_weights', action='store_true', help='share weights beetween samples')
     parser.add_argument('--naive_clip_weights_percentage', dest='clip_weights_percentage', type=float, default=0.0, help='clip weights according to given percentage')
     parser.add_argument('--which_epoch', dest='which_epoch', type=int, default=0, help='decide which epoch to read the checkpoint')
     parser.add_argument('--generate_timeline', dest='generate_timeline', action='store_true', help='generate timeline files')
-    parser.add_argument('--encourage_sparse_features', dest='encourage_sparse_features', action='store_true', help='if true, encourage selecting sparse number of features')
+    parser.add_argument('--feature_reduction', dest='encourage_sparse_features', action='store_true', help='if true, encourage selecting sparse number of features')
     parser.add_argument('--collect_validate_loss', dest='collect_validate_loss', action='store_true', help='if true, collect validation loss (and training score) and write to tensorboard')
     parser.add_argument('--collect_validate_while_training', dest='collect_validate_while_training', action='store_true', help='if true, collect validation loss while training')
     parser.add_argument('--clip_weights_percentage_after_normalize', dest='clip_weights_percentage_after_normalize', type=float, default=0.0, help='clip weights after being normalized in feature selection layer')
@@ -166,6 +187,15 @@ def main():
     parser.add_argument('--abs_normalize', dest='abs_normalize', action='store_true', help='when specified, use sum of abs values as normalization')
     parser.add_argument('--rowwise_L2_normalize', dest='rowwise_L2_normalize', action='store_true', help='when specified, normalize feature selection matrix by divide row-wise L2 norm sum, then regularize the resulting matrix with L1')
     parser.add_argument('--Frobenius_normalize', dest='Frobenius_normalize', action='store_true', help='when specified, use Frobenius norm to normalize feature selecton matrix, followed by L1 regularization')
+    parser.add_argument('--add_initial_layers', dest='add_initial_layers', action='store_true', help='add initial conv layers without dilation')
+    parser.add_argument('--initial_layer_channels', dest='initial_layer_channels', type=int, default=-1, help='number of channels in initial layers')
+    parser.add_argument('--feature_reduction_channel_by_samples', dest='feature_reduction_channel_by_samples', action='store_true', help='adjust feature reduction channel by number of samples in data')
+    parser.add_argument('--conv_channel_multiplier', dest='conv_channel_multiplier', type=int, default=1, help='multiplier for conv channel')
+    parser.add_argument('--add_final_layers', dest='add_final_layers', action='store_true', help='add final conv layers without dilation')
+    parser.add_argument('--final_layer_channels', dest='final_layer_channels', type=int, default=-1, help='number of channels in final layers')
+    parser.add_argument('--dilation_remove_large', dest='dilation_remove_large', action='store_true', help='when specified, use ordinary conv layer instead of dilated conv layer with large dilation rate')
+    parser.add_argument('--dilation_clamp_large', dest='dilation_clamp_large', action='store_true', help='when specified, clamp large dilation rate to a give threshold')
+    parser.add_argument('--dilation_threshold', dest='dilation_threshold', type=int, default=8, help='threshold used to remove or clamp dilation')
     
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -178,7 +208,7 @@ def main():
     parser.set_defaults(upsample_single=False)
     parser.set_defaults(upsample_shrink_feature=False)
     parser.set_defaults(test_training=False)
-    parser.set_defaults(deconv=True)
+    parser.set_defaults(deconv=False)
     parser.set_defaults(share_weights=False)
     parser.set_defaults(generate_timeline=False)
     parser.set_defaults(encourage_sparse_features=False)
@@ -188,8 +218,31 @@ def main():
     parser.set_defaults(abs_normalize=False)
     parser.set_defaults(rowwise_L2_normalize=False)
     parser.set_defaults(Frobenius_normalize=False)
+    parser.set_defaults(add_initial_layers=False)
+    parser.set_defaults(feature_reduction_channel_by_samples=False)
+    parser.set_defaults(add_final_layers=False)
+    parser.set_defaults(dilation_remove_large=False)
+    parser.set_defaults(dilation_clamp_large=False)
     
     args = parser.parse_args()
+    
+    main_network(args)
+    
+def copy_option(args):
+    new_args = copy.copy(args)
+    delattr(new_args, 'is_train')
+    delattr(new_args, 'dataroot')
+    delattr(new_args, 'clip_weights')
+    delattr(new_args, 'test_training')
+    delattr(new_args, 'clip_weights_percentage')
+    delattr(new_args, 'which_epoch')
+    delattr(new_args, 'generate_timeline')
+    delattr(new_args, 'collect_validate_loss')
+    delattr(new_args, 'collect_validate_while_training')
+    delattr(new_args, 'clip_weights_percentage_after_normalize')
+    return new_args
+    
+def main_network(args):
     
     if args.is_bin:
         assert not args.preload
@@ -199,12 +252,46 @@ def main():
     if args.name == '':
         args.name = ''.join(random.choice(string.digits) for _ in range(5))
     
+    if not os.path.isdir(args.name):
+        os.makedirs(args.name)
+        
+    option_file = os.path.join(args.name, 'option.txt')
+    option_copy = copy_option(args)
+    if os.path.exists(option_file):
+        option_str = open(option_file).read()
+        print(str(option_copy))
+        assert option_str == str(option_copy)
+    else:
+        open(option_file, 'w').write(str(option_copy))
     
     assert np.log2(args.upsample_scale) == int(np.log2(args.upsample_scale))
     deconv_layers = int(np.log2(args.upsample_scale))
     
-    assert args.input_nc % args.nsamples == 0
-    nfeatures = args.input_nc // args.nsamples
+    if not args.feature_reduction_channel_by_samples:
+        assert args.input_nc % args.nsamples == 0
+        nfeatures = args.input_nc // args.nsamples
+    else:
+        nfeatures = args.input_nc
+    
+    assert not (args.share_weights and args.feature_reduction_channel_by_samples)
+    
+    global actual_conv_channel
+    actual_conv_channel *= args.conv_channel_multiplier
+    if args.initial_layer_channels < 0:
+        args.initial_layer_channels = actual_conv_channel
+    if args.final_layer_channels < 0:
+        args.final_layer_channels = actual_conv_channel
+        
+    global dilation_threshold
+    dilation_threshold = args.dilation_threshold
+    assert (not args.dilation_clamp_large) or (not args.dilation_remove_large)
+    global dilation_clamp_large
+    dilation_clamp_large = args.dilation_clamp_large
+    global dilation_remove_large
+    dilation_remove_large = args.dilation_remove_large
+        
+    if not args.add_final_layers:
+        args.final_layer_channels = -1
     
     input_names, output_names, val_names, val_img_names = prepare_data_root(args.dataroot)
     if args.test_training:
@@ -233,11 +320,11 @@ def main():
             
             input = tf.reshape(input, (args.input_h, args.input_w, args.input_nc))
             output = tf.to_float(tf.image.decode_image(tf.read_file(output_queue), channels=3)) / 255.0
-            output.set_shape((args.input_h, args.input_w, 3))
+            output.set_shape((640, 960, 3))
             
             print("start batch")
             if args.is_train:
-                input, output = tf.train.batch([input, output], 1, num_threads=10, capacity=20)
+                input, output = tf.train.batch([input, output], 1, num_threads=5, capacity=10)
             else:
                 input = tf.expand_dims(input, axis=0)
                 output = tf.expand_dims(output, axis=0)
@@ -246,16 +333,16 @@ def main():
             #input = tf.expand_dims(input, 0)
             #output = tf.expand_dims(output, 0)
             
-            #if args.share_weights:
-            #    input = tf.reshape(input, (args.input_h, args.input_w, args.nsamples, nfeatures))
-            #    input = tf.transpose(input, perm=[2, 0, 1, 3])
+            if args.share_weights:
+                input = tf.reshape(input, (args.input_h, args.input_w, args.nsamples, nfeatures))
+                input = tf.transpose(input, perm=[2, 0, 1, 3])
             #else:
             #    input = tf.expand_dims(input, axis=0)
             #output = tf.expand_dims(output, axis=0)
         # TODO: finish logic when using batch queues
         else:
             raise
-    if args.input_nc <= conv_channel:
+    if args.input_nc <= actual_conv_channel:
         ini_id = True
     else:
         ini_id = False
@@ -281,7 +368,7 @@ def main():
         assert not args.is_train
     
         replace_normalize_weights = tf.placeholder(tf.bool)
-        normalize_weights = tf.placeholder(tf.float32,shape=[1, 1, args.input_nc, conv_channel])
+        normalize_weights = tf.placeholder(tf.float32,shape=[1, 1, args.input_nc, actual_conv_channel])
     else:
         replace_normalize_weights = None
         normalize_weights = None
@@ -292,8 +379,13 @@ def main():
         regularizer = None
         if (args.regularizer_scale > 0 or args.L2_regularizer_scale > 0) and not manual_regularize:
             regularizer = slim.l1_l2_regularizer(scale_l1=args.regularizer_scale, scale_l2=args.L2_regularizer_scale)
+        actual_initial_layer_channels = args.initial_layer_channels
+        actual_nfeatures = nfeatures
+        if args.feature_reduction_channel_by_samples:
+            actual_initial_layer_channels *= args.nsamples
+            actual_nfeatures = args.input_nc
         with tf.variable_scope("feature_reduction"):
-            weights = tf.get_variable('w0', [1, 1, args.input_nc, conv_channel], initializer=tf.contrib.layers.xavier_initializer(), regularizer=regularizer)
+            weights = tf.get_variable('w0', [1, 1, actual_nfeatures, actual_initial_layer_channels], initializer=tf.contrib.layers.xavier_initializer(), regularizer=regularizer)
             if args.normalize_weights:
                 if args.abs_normalize:
                     column_sum = tf.reduce_sum(tf.abs(weights), [0, 1, 2])
@@ -312,18 +404,24 @@ def main():
             input_to_network = tf.nn.conv2d(input_to_network, weights_to_input, [1, 1, 1, 1], "SAME")
             if manual_regularize:
                 regularizer_loss = args.regularizer_scale * tf.reduce_mean(tf.abs(weights_to_input))
-            ini_id = True
+            if actual_initial_layer_channels <= actual_conv_channel:
+                ini_id = True
+            else:
+                ini_id = False
+        if args.add_initial_layers:
+            for nlayer in range(3):
+                input_to_network = slim.conv2d(input_to_network, actual_initial_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(), scope='initial_'+str(nlayer), weights_regularizer=regularizer)
         
     if deconv_layers > 0:
         if args.deconv:
             regularizer = None
             if not no_L1_reg_other_layers and args.regularizer_scale > 0.0:
                 regularizer = slim.l1_regularizer(args.regularizer_scale)
-            out_feature = args.input_nc if not args.encourage_sparse_features else conv_channel
+            out_feature = args.input_nc if not args.encourage_sparse_features else actual_conv_channel
             if not args.upsample_single:
                 if args.upsample_shrink_feature:
                     assert not args.encourage_sparse_features
-                    out_feature = min(args.input_nc, conv_channel)
+                    out_feature = min(args.input_nc, actual_conv_channel)
                     ini_id = True
                 for i in range(deconv_layers):
                     input_to_network = slim.conv2d_transpose(input_to_network, out_feature, 3, stride=2, weights_initializer=identity_initializer(), scope='deconv'+str(i+1), weights_regularizer=regularizer)
@@ -336,14 +434,14 @@ def main():
                     upsample_stacks.append(tf.squeeze(current_channel, axis=3))
                 input_to_network = tf.stack(upsample_stacks, axis=3)
         else:
-            input_to_network = tf.image.resize_images(input_to_network, tf.stack([tf.shape(input_to_network)[1] * args.upsample_scale, tf.shape(input_to_network)[2] * args.upsample_scale]))
+            input_to_network = tf.image.resize_images(input_to_network, tf.stack([tf.shape(input_to_network)[1] * args.upsample_scale, tf.shape(input_to_network)[2] * args.upsample_scale]), method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
             
-    network=build(input_to_network, ini_id, regularizer_scale=args.regularizer_scale)
+    network=build(input_to_network, ini_id, regularizer_scale=args.regularizer_scale, share_weights=args.share_weights, final_layer_channels=args.final_layer_channels)
+                    
     if args.share_weights:
         assert not args.use_batch
-        loss = tf.reduce_mean(tf.square(tf.reduce_mean(network, 0) - tf.squeeze(output)))
-    else:
-        loss=tf.reduce_mean(tf.square(network-output))
+        #loss = tf.reduce_mean(tf.square(tf.reduce_mean(network, 0) - tf.squeeze(output)))
+    loss=tf.reduce_mean(tf.square(network-output))
     avg_loss = 0
     tf.summary.scalar('avg_loss', avg_loss)
     avg_test_close = 0
@@ -559,7 +657,8 @@ def main():
             
             summary = tf.Summary()
             summary.value.add(tag='avg_loss', simple_value=avg_loss)
-            summary.value.add(tag='reg_loss', simple_value=sess.run(regularizer_loss) / args.regularizer_scale)
+            if manual_regularize:
+                summary.value.add(tag='reg_loss', simple_value=sess.run(regularizer_loss) / args.regularizer_scale)
             
             
             if args.collect_validate_while_training:
@@ -593,7 +692,7 @@ def main():
                 summary.value.add(tag='avg_test_middle', simple_value=avg_test_middle)
                 summary.value.add(tag='avg_test_all', simple_value=avg_test_all)
                 
-            train_writer.add_run_metadata(run_metadata, 'epoch%d' % epoch)
+            #train_writer.add_run_metadata(run_metadata, 'epoch%d' % epoch)
             train_writer.add_summary(summary, epoch)
                 
             if epoch % save_frequency == 0:
@@ -632,6 +731,8 @@ def main():
                 
                 
                 ckpt = tf.train.get_checkpoint_state(os.path.join(args.name, dir))
+                if ckpt is None:
+                    continue
                 print('loaded '+ckpt.model_checkpoint_path)
                 saver.restore(sess,ckpt.model_checkpoint_path)
                 
@@ -741,7 +842,7 @@ def main():
     total number of weights: {total_num_weights}""".format(**locals()))
             target.close()
         elif args.clip_weights_percentage_after_normalize > 0.0:
-                weights_val = sess.run(weights_to_input, feed_dict={replace_normalize_weights: False, normalize_weights: np.empty((1, 1, args.input_nc, conv_channel))})
+                weights_val = sess.run(weights_to_input, feed_dict={replace_normalize_weights: False, normalize_weights: np.empty((1, 1, args.input_nc, actual_conv_channel))})
                 percentile = np.percentile(abs(weights_val), args.clip_weights_percentage_after_normalize)
                 weights_val[abs(weights_val) < percentile] = 0
                 elements_left_per_row = numpy.sum((weights_val != 0), (0, 1, 2))
@@ -775,8 +876,7 @@ def main():
             if args.clip_weights_percentage_after_normalize > 0:
                 feed_dict[replace_normalize_weights] = True
                 feed_dict[normalize_weights] = weights_val
-            output_image, current, debug_val=sess.run([network, loss, input_queue],feed_dict=feed_dict)
-            print(debug_val)
+            output_image, current=sess.run([network, loss],feed_dict=feed_dict)
             print("%.3f"%(time.time()-st))
             all_test[ind] = current * 255.0 * 255.0
             output_image=np.minimum(np.maximum(output_image,0.0),1.0)*255.0
@@ -794,10 +894,19 @@ def main():
             target=open(os.path.join(test_dirname, 'score_breakdown.txt'),'w')
             target.write("%f, %f, %f"%(score_close, score_far, score_middle))  
             target.close()
-            
-    coord.request_stop()
-    coord.join(threads)
+
+        if args.test_training:
+            grounddir = os.path.join(args.dataroot, 'train_img')
+        else:
+            grounddir = os.path.join(args.dataroot, 'test_img')        
+    
+    if args.use_queue:
+        coord.request_stop()
+        coord.join(threads)
     sess.close()
+    
+    if not args.is_train:
+        os.system('source activate pytorch36 && CUDA_VISIBLE_DEVICES=1, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir) 
             
 if __name__ == '__main__':
     main()

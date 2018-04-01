@@ -7,14 +7,14 @@ import skimage.measure
 import numpy
 import skimage.io
 
-MSE_ONLY = True
+MSE_ONLY = False
 
-TEST_GROUND = '/localtmp/yuting/out_1x_1_sample/train/zigzag_plane_normal_spheres/test_img'
-TRAIN_GROUND = '/localtmp/yuting/out_1x_1_sample/train/zigzag_plane_normal_spheres/train_img'
+#TEST_GROUND = '/localtmp/yuting/out_1x_1_sample/train/zigzag_plane_normal_spheres/test_img'
+#TRAIN_GROUND = '/localtmp/yuting/out_1x_1_sample/train/zigzag_plane_normal_spheres/train_img'
 #TEST_GROUND = '/bigtemp/yy2bb/out_4_sample_features_random_camera_uniform_all_features/zigzag_plane_normal_spheres/datas/test_img'
 #TRAIN_GROUND = '/bigtemp/yy2bb/out_4_sample_features_random_camera_uniform_all_features/zigzag_plane_normal_spheres/datas/train_img'
-#TEST_GROUND = '/localtmp/yuting/datas_features_only/datas_feature_only/test_img'
-#TRAIN_GROUND = '/localtmp/yuting/datas_features_only/datas_feature_only/train_img'
+TEST_GROUND = '/localtmp/yuting/datas_features_only/datas_feature_only/test_img'
+TRAIN_GROUND = '/localtmp/yuting/datas_features_only/datas_feature_only/train_img'
 
 if not MSE_ONLY:
     sys.path += ['../../PerceptualSimilarity']
@@ -152,7 +152,12 @@ def get_score(name):
                 if not os.path.exists(perceptual_file):
                     compute_perceptual(os.path.join(name, dir), TRAIN_GROUND)
                 train_perceptual_y.append(float(open(perceptual_file).read()))
-            
+    
+    if len(train_x) == 0:
+        compute_ssim(name, sys.argv[2])
+        compute_perceptual(name, sys.argv[2])
+        return
+        
     figure = pyplot.figure()
     pyplot.plot(train_x, train_y, label='train_loss')
     pyplot.plot(test_x, test_all_y, label='test_all_loss')
