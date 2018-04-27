@@ -13,6 +13,649 @@ import copy
 allowed_dtypes = ['float64', 'float32', 'uint8']
 no_L1_reg_other_layers = True
 
+width = 480
+height = 320
+
+dtype=tf.float32
+
+batch_norm_is_training = True
+
+def get_tensors():
+    # 2x_1sample on margo
+    #camera_pos = np.load('/localtmp/yuting/out_2x1_manual_carft/train.npy')[0, :]
+    #all_features = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/g_intermediates00000.npy')
+    
+    #feature_scale = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/feature_scale_backup.npy')
+    #feature_bias = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/feature_bias_backup.npy')
+    
+    # 1x_1sample on minion
+    camera_pos = np.load('/localtmp/yuting/out_1x1_manual_craft/out_1x1_manual_craft/train.npy')[0, :]
+    
+    feature_scale = np.load('/localtmp/yuting/out_1x1_manual_craft/out_1x1_manual_craft/train/zigzag_plane_normal_spheres/feature_scale.npy')
+    feature_bias = np.load('/localtmp/yuting/out_1x1_manual_craft/out_1x1_manual_craft/train/zigzag_plane_normal_spheres/feature_bias.npy')
+    global width
+    width = 960
+    global height
+    height = 640
+    
+    #samples = [all_features[-2, :, :], all_features[-1, :, :]]
+    features = get_render(camera_pos)
+    valid_inds = []
+    
+    for i in range(len(features)):
+        if isinstance(features[i], (float, int)):
+            features[i] = tf.constant(features[i], dtype=dtype, shape=(height, width))
+            continue
+        valid_inds.append(i)
+        features[i] += feature_bias[i]
+        features[i] *= feature_scale[i]
+    features = tf.expand_dims(tf.stack(features, axis=2), axis=0)
+    #features = tf.expand_dims(tf.stack([features[k] for k in valid_inds], axis=2), axis=0)
+    numpy.save('valid_inds.npy', valid_inds)
+    return features
+
+def get_render(camera_pos, samples=None):
+    f_log_intermediate = [None] * 266
+    xv, yv = numpy.meshgrid(numpy.arange(width), numpy.arange(height), indexing='ij')
+    xv = np.transpose(xv)
+    yv = np.transpose(yv)
+    tensor_x0 = tf.constant(xv, dtype=dtype)
+    tensor_x1 = tf.constant(yv, dtype=dtype)
+    tensor_x2 = 0
+    
+    if samples is None:
+        sample1 = tf.random_normal(xv.shape)
+        sample2 = tf.random_normal(xv.shape)
+    else:
+        #sample1 = tf.constant(samples[0], dtype=dtype)
+        #sample2 = tf.constant(samples[1], dtype=dtype)
+        sample1 = samples[0]
+        sample2 = samples[1]
+    
+    vector3 = [tensor_x0 + 0.5 * sample1, tensor_x1 + 0.5 * sample2, tensor_x2]
+    get_shader(vector3, f_log_intermediate, camera_pos)
+    
+    f_log_intermediate[264] = sample1
+    f_log_intermediate[265] = sample2
+    
+    return f_log_intermediate
+
+def get_shader(x, f_log_intermediate, camera_pos):
+    features = get_features(x, camera_pos)
+    f(features, f_log_intermediate)
+    
+    h = 1e-8
+    features_neg = get_features([x[0]-h, x[1], x[2]], camera_pos)
+    features_pos = get_features([x[0]+h, x[1], x[2]], camera_pos)
+    f_log_intermediate[259] = (features_pos[1] - features_neg[1]) / (2 * h)
+    f_log_intermediate[260] = (features_pos[2] - features_neg[2]) / (2 * h)
+    
+    features_neg = get_features([x[0], x[1]-h, x[2]], camera_pos)
+    features_pos = get_features([x[0], x[1]+h, x[2]], camera_pos)
+    f_log_intermediate[261] = (features_pos[1] - features_neg[1]) / (2 * h)
+    f_log_intermediate[262] = (features_pos[2] - features_neg[2]) / (2 * h)
+    
+    f_log_intermediate[263] = f_log_intermediate[259] * f_log_intermediate[262] - f_log_intermediate[260] * f_log_intermediate[261]
+    return
+    
+def get_features(x, camera_pos):
+    ray_dir = [x[0] - width / 2, x[1] + 1, width / 2]
+    ray_origin = camera_pos[:3]
+    
+    ray_dir_norm = tf.sqrt(ray_dir[0] **2 + ray_dir[1] ** 2 + ray_dir[2] ** 2)
+    ray_dir[0] /= ray_dir_norm
+    ray_dir[1] /= ray_dir_norm
+    ray_dir[2] /= ray_dir_norm
+    
+    sin1 = np.sin(camera_pos[3]);
+    cos1 = np.cos(camera_pos[3]);
+    sin2 = np.sin(camera_pos[4]);
+    cos2 = np.cos(camera_pos[4]);
+    sin3 = np.sin(camera_pos[5]);
+    cos3 = np.cos(camera_pos[5]);
+    
+    ray_dir_p = [cos2 * cos3 * ray_dir[0] + (-cos1 * sin3 + sin1 * sin2 * cos3) * ray_dir[1] + (sin1 * sin3 + cos1 * sin2 * cos3) * ray_dir[2],
+                 cos2 * sin3 * ray_dir[0] + (cos1 * cos3 + sin1 * sin2 * sin3) * ray_dir[1] + (-sin1 * cos3 + cos1 * sin2 * sin3) * ray_dir[2],
+                 -sin2 * ray_dir[0] + sin1 * cos2 * ray_dir[1] + cos1 * cos2 * ray_dir[2]]
+    
+    N = [0, 0, 1.0]
+    
+    light_dir = [0.22808577638091165, 0.60822873701576452, 0.76028592126970562]
+    
+    t_ray = -ray_origin[2] / ray_dir_p[2]
+    
+    features = [None] * 8
+    features[0] = x[2]
+    features[1] = ray_origin[0] + t_ray * ray_dir_p[0]
+    features[2] = ray_origin[1] + t_ray * ray_dir_p[1]
+    features[3] = ray_origin[2] + t_ray * ray_dir_p[2]
+    features[4] = -ray_dir_p[0]
+    features[5] = -ray_dir_p[1]
+    features[6] = -ray_dir_p[2]
+    features[7] = t_ray
+    return features
+    
+def f(X, f_log_intermediate):
+    var006 = X[7]
+    var005__log_is_intersect = var006
+    var004_our_sign_up = tf.sign(var005__log_is_intersect)
+    var003 = ((var004_our_sign_up)*(0.5))
+    var001 = ((var003)+(0.5))
+    var024_light_dir_x = 0.228085776381
+    var022__log_light_dir_x = var024_light_dir_x
+    var036_tangent_t_y = 0.0
+    var037_tangent_b_z = 0.0
+    var034 = 0.0
+    var038_tangent_t_z = 0.0
+    var039_tangent_b_y = 1.0
+    var035 = 0.0
+    var033 = 0.0
+    var031_cross_tangent_x = 0.0
+    var058 = X[1]
+    var057_tex_coords_x = var058
+    var056 = ((0.5)*(var057_tex_coords_x))
+    var055_fract = tf.floormod(var056, 1)
+    var054 = ((var055_fract)*(2))
+    var053 = ((var054)-(1))
+    var052 = ((var053) * (var053))
+    var050 = ((1)-(var052))
+    var064 = X[2]
+    var063_tex_coords_y = var064
+    var062 = ((0.5)*(var063_tex_coords_y))
+    var061_fract = tf.floormod(var062, 1)
+    var060 = ((var061_fract)*(2))
+    var059 = ((var060)-(1))
+    var051 = ((var059) * (var059))
+    var049 = ((var050)-(var051))
+    var048_h2 = var049
+    var047_our_sign_down = tf.sign(var048_h2)
+    var046 = ((var047_our_sign_down)*(0.5))
+    var045 = ((var046)+(0.5))
+    var043_valid = var045
+    var065 = ((-1.0)*(var053))
+    var069_max = tf.maximum(var048_h2,1e-05)
+    var068 = tf.sqrt(var069_max)
+    var067_h = var068
+    var066 = (1.0/tf.sqrt(var067_h))
+    var044 = ((var065)*(var066))
+    var042 = ((var043_valid)*(var044))
+    var040_dhdu = var042
+    var073_normal_y = 0.0
+    var071 = 0.0
+    var074_normal_z = 1.0
+    var072 = 1.0
+    var070 = -1.0
+    var041_small_t_x = -1.0
+    var032 = -var040_dhdu
+    var029 = -var032
+    var079 = ((-1.0)*(var059))
+    var078 = ((var079)*(var066))
+    var077 = ((var043_valid)*(var078))
+    var075_dhdv = var077
+    var081 = 0.0
+    var082 = 0.0
+    var080 = 0.0
+    var076_small_b_x = 0.0
+    var030 = 0.0
+    var027 = ((var029))
+    var087 = ((var027) * (var027))
+    var097_tangent_b_x = 0.0
+    var095 = 0.0
+    var098_tangent_t_x = 1.0
+    var096 = 0.0
+    var094 = 0.0
+    var092_cross_tangent_y = 0.0
+    var101 = 0.0
+    var103_normal_x = 0.0
+    var102 = 0.0
+    var100 = 0.0
+    var099_small_t_y = 0.0
+    var093 = 0.0
+    var090 = 0.0
+    var106 = 0.0
+    var107 = 1.0
+    var105 = -1.0
+    var104_small_b_y = -1.0
+    var091 = -var075_dhdv
+    var089 = var075_dhdv
+    var088 = ((var089) * (var089))
+    var085 = ((var087)+(var088))
+    var114 = 1.0
+    var115 = 0.0
+    var113 = 1.0
+    var111_cross_tangent_z = 1.0
+    var118 = 0.0
+    var119 = 0.0
+    var117 = 0.0
+    var116_small_t_z = 0.0
+    var112 = 0.0
+    var109 = 1.0
+    var122 = 0.0
+    var123 = 0.0
+    var121 = 0.0
+    var120_small_b_z = 0.0
+    var110 = 0.0
+    var108 = 1.0
+    var086 = 1.0
+    var084 = ((var085)+(1.0))
+    var083 = tf.sqrt(var084)
+    var028_Nl = var083
+    var026 = ((var027)/(var028_Nl))
+    var025_unit_new_normal_x = var026
+    var023__log_normal_x = var025_unit_new_normal_x
+    var020 = ((var022__log_light_dir_x)*(var023__log_normal_x))
+    var126_light_dir_y = 0.608228737016
+    var124__log_light_dir_y = var126_light_dir_y
+    var128 = ((var089)/(var028_Nl))
+    var127_unit_new_normal_y = var128
+    var125__log_normal_y = var127_unit_new_normal_y
+    var021 = ((var124__log_light_dir_y)*(var125__log_normal_y))
+    var018 = ((var020)+(var021))
+    var131_light_dir_z = 0.76028592127
+    var129__log_light_dir_z = var131_light_dir_z
+    var133 = ((1.0)/(var028_Nl))
+    var132_unit_new_normal_z = var133
+    var130__log_normal_z = var132_unit_new_normal_z
+    var019 = ((var129__log_light_dir_z)*(var130__log_normal_z))
+    var016 = ((var018)+(var019))
+    var134 = ((0.0)-(var016))
+    var137_our_sign = tf.sign(var134)
+    var136 = ((var137_our_sign)*(0.5))
+    var135 = ((var136)+(0.5))
+    var017 = ((var134)*(var135))
+    var015 = ((var016)+(var017))
+    var014__log_diffuse_intensity = var015
+    var013 = ((0.8)*(var014__log_diffuse_intensity))
+    var011__log_base_diffuse = var013
+    var151__log_LN = var016
+    var150 = ((2.0)*(var151__log_LN))
+    var149 = ((var150)*(var023__log_normal_x))
+    var148 = ((var149)-(var022__log_light_dir_x))
+    var146__log_R_x = var148
+    var152 = X[4]
+    var147__log_viewer_dir_x = var152
+    var144 = ((var146__log_R_x)*(var147__log_viewer_dir_x))
+    var156 = ((var150)*(var125__log_normal_y))
+    var155 = ((var156)-(var124__log_light_dir_y));
+    var153__log_R_y = var155
+    var157 = X[5]
+    var154__log_viewer_dir_y = var157
+    var145 = ((var153__log_R_y)*(var154__log_viewer_dir_y))
+    var142 = ((var144)+(var145))
+    var161 = ((var150)*(var130__log_normal_z))
+    var160 = ((var161)-(var129__log_light_dir_z))
+    var158__log_R_z = var160
+    var162 = X[6]
+    var159__log_viewer_dir_z = var162
+    var143 = ((var158__log_R_z)*(var159__log_viewer_dir_z))
+    var141 = ((var142)+(var143))
+    var140_max = tf.maximum(var141,0.0)
+    var139 = var140_max ** 50.0
+    var138__log_specular_intensity = var139
+    var012__log_base_specular = var138__log_specular_intensity
+    var009 = ((var011__log_base_diffuse)+(var012__log_base_specular))
+    var189 = 0.0
+    var187 = 0.0
+    var198 = 1.0
+    var200 = 0.0
+    var199 = 0.0
+    var196 = 1.0
+    var201 = 0.0
+    var197 = 0.0
+    var194 = 1.0
+    var202 = 0.0
+    var195 = 0.0
+    var192 = 1.0
+    var203 = 0.0
+    var193 = 0.0
+    var190 = 1.0
+    var204 = 0.0
+    var191 = 0.0
+    var188 = 1.0
+    var186 = 0.0
+    var184 = 0.0
+    var207 = 0.0
+    var206 = 0.0
+    var205 = 0.0
+    var185 = 0.0
+    var182 = 0.0
+    var209 = 1.0
+    var208 = 1.0
+    var183 = 1.0
+    var181 = 1.0
+    var180_new_normal_ref_z = 1.0
+    var179 = ((var067_h))
+    var177_scale = var179
+    var216 = 1.0
+    var217 = 0.0
+    var215 = 1.0
+    var214 = 1.0
+    var212 = ((var152))
+    var220 = 0.0
+    var221 = 0.0
+    var219 = 0.0
+    var218 = 0.0
+    var213 = 0.0
+    var210 = ((var212))
+    var223 = 0.0
+    var222 = 0.0
+    var211 = 0.0
+    var178 = ((var210))
+    var176 = ((var177_scale)*(var178))
+    var175 = ((var057_tex_coords_x)+(var176))
+    var174__log_tex_coords_x = var175
+    var172__log_xarg = var174__log_tex_coords_x
+    var236 = 0.0
+    var237 = 0.0
+    var235 = 0.0
+    var234 = 0.0
+    var232 = 0.0
+    var240 = 1.0
+    var241 = 0.0
+    var239 = 1.0
+    var238 = 1.0
+    var233 = ((var157))
+    var230 = ((var233))
+    var243 = 0.0
+    var242 = 0.0
+    var231 = 0.0
+    var229 = ((var230))
+    var228 = ((var177_scale)*(var229))
+    var227 = ((var063_tex_coords_y)+(var228))
+    var226__log_tex_coords_y = var227
+    var225__log_yarg = var226__log_tex_coords_y
+    var224_sin = tf.sin(var225__log_yarg)
+    var173 = ((0.8)*(var224_sin))
+    var171 = ((var172__log_xarg)+(var173))
+    var170_sin = tf.sin(var171)
+    var169 = ((0.5)*(var170_sin))
+    var168_our_sign = tf.sign(var169)
+    var167 = ((0.4)*(var168_our_sign))
+    var166 = ((0.6)+(var167))
+    var164__log_modulation1 = var166
+    var248 = ((var171)*(0.5))
+    var247_cos = tf.cos(var248)
+    var246 = ((0.5)*(var247_cos))
+    var245 = ((0.5)+(var246))
+    var244 = ((-0.7)*(var245))
+    var165 = ((1.0)+(var244))
+    var163 = ((var164__log_modulation1)*(var165))
+    var010__log_diffuse_sum_x = var163
+    var008 = ((var009)*(var010__log_diffuse_sum_x))
+    var007 = ((var008)+(0.1))
+    var002__log_output_intensity_r = var007
+    var000_our_select = var002__log_output_intensity_r * var001
+    var253__log_diffuse_sum_y = var163
+    var252 = ((var009)*(var253__log_diffuse_sum_y))
+    var251 = ((var252)+(0.1))
+    var250__log_output_intensity_g = var251
+    var249_our_select = var001 * var250__log_output_intensity_g
+    var258__log_diffuse_sum_z = var164__log_modulation1
+    var257 = ((var009)*(var258__log_diffuse_sum_z))
+    var256 = ((var257)+(0.1))
+    var255__log_output_intensity_b = var256
+    var254_our_select = var001 * var255__log_output_intensity_b
+    f_log_intermediate[0] = var000_our_select;
+    f_log_intermediate[1] = var001;
+    f_log_intermediate[2] = var002__log_output_intensity_r;
+    f_log_intermediate[3] = var003;
+    f_log_intermediate[4] = var004_our_sign_up;
+    f_log_intermediate[5] = var005__log_is_intersect;
+    f_log_intermediate[6] = var006;
+    f_log_intermediate[7] = var007;
+    f_log_intermediate[8] = var008;
+    f_log_intermediate[9] = var009;
+    f_log_intermediate[10] = var010__log_diffuse_sum_x;
+    f_log_intermediate[11] = var011__log_base_diffuse;
+    f_log_intermediate[12] = var012__log_base_specular;
+    f_log_intermediate[13] = var013;
+    f_log_intermediate[14] = var014__log_diffuse_intensity;
+    f_log_intermediate[15] = var015;
+    f_log_intermediate[16] = var016;
+    f_log_intermediate[17] = var017;
+    f_log_intermediate[18] = var018;
+    f_log_intermediate[19] = var019;
+    f_log_intermediate[20] = var020;
+    f_log_intermediate[21] = var021;
+    f_log_intermediate[22] = var022__log_light_dir_x;
+    f_log_intermediate[23] = var023__log_normal_x;
+    f_log_intermediate[24] = var024_light_dir_x;
+    f_log_intermediate[25] = var025_unit_new_normal_x;
+    f_log_intermediate[26] = var026;
+    f_log_intermediate[27] = var027;
+    f_log_intermediate[28] = var028_Nl;
+    f_log_intermediate[29] = var029;
+    f_log_intermediate[30] = var030;
+    f_log_intermediate[31] = var031_cross_tangent_x;
+    f_log_intermediate[32] = var032;
+    f_log_intermediate[33] = var033;
+    f_log_intermediate[34] = var034;
+    f_log_intermediate[35] = var035;
+    f_log_intermediate[36] = var036_tangent_t_y;
+    f_log_intermediate[37] = var037_tangent_b_z;
+    f_log_intermediate[38] = var038_tangent_t_z;
+    f_log_intermediate[39] = var039_tangent_b_y;
+    f_log_intermediate[40] = var040_dhdu;
+    f_log_intermediate[41] = var041_small_t_x;
+    f_log_intermediate[42] = var042;
+    f_log_intermediate[43] = var043_valid;
+    f_log_intermediate[44] = var044;
+    f_log_intermediate[45] = var045;
+    f_log_intermediate[46] = var046;
+    f_log_intermediate[47] = var047_our_sign_down;
+    f_log_intermediate[48] = var048_h2;
+    f_log_intermediate[49] = var049;
+    f_log_intermediate[50] = var050;
+    f_log_intermediate[51] = var051;
+    f_log_intermediate[52] = var052;
+    f_log_intermediate[53] = var053;
+    f_log_intermediate[54] = var054;
+    f_log_intermediate[55] = var055_fract;
+    f_log_intermediate[56] = var056;
+    f_log_intermediate[57] = var057_tex_coords_x;
+    f_log_intermediate[58] = var058;
+    f_log_intermediate[59] = var059;
+    f_log_intermediate[60] = var060;
+    f_log_intermediate[61] = var061_fract;
+    f_log_intermediate[62] = var062;
+    f_log_intermediate[63] = var063_tex_coords_y;
+    f_log_intermediate[64] = var064;
+    f_log_intermediate[65] = var065;
+    f_log_intermediate[66] = var066;
+    f_log_intermediate[67] = var067_h;
+    f_log_intermediate[68] = var068;
+    f_log_intermediate[69] = var069_max;
+    f_log_intermediate[70] = var070;
+    f_log_intermediate[71] = var071;
+    f_log_intermediate[72] = var072;
+    f_log_intermediate[73] = var073_normal_y;
+    f_log_intermediate[74] = var074_normal_z;
+    f_log_intermediate[75] = var075_dhdv;
+    f_log_intermediate[76] = var076_small_b_x;
+    f_log_intermediate[77] = var077;
+    f_log_intermediate[78] = var078;
+    f_log_intermediate[79] = var079;
+    f_log_intermediate[80] = var080;
+    f_log_intermediate[81] = var081;
+    f_log_intermediate[82] = var082;
+    f_log_intermediate[83] = var083;
+    f_log_intermediate[84] = var084;
+    f_log_intermediate[85] = var085;
+    f_log_intermediate[86] = var086;
+    f_log_intermediate[87] = var087;
+    f_log_intermediate[88] = var088;
+    f_log_intermediate[89] = var089;
+    f_log_intermediate[90] = var090;
+    f_log_intermediate[91] = var091;
+    f_log_intermediate[92] = var092_cross_tangent_y;
+    f_log_intermediate[93] = var093;
+    f_log_intermediate[94] = var094;
+    f_log_intermediate[95] = var095;
+    f_log_intermediate[96] = var096;
+    f_log_intermediate[97] = var097_tangent_b_x;
+    f_log_intermediate[98] = var098_tangent_t_x;
+    f_log_intermediate[99] = var099_small_t_y;
+    f_log_intermediate[100] = var100;
+    f_log_intermediate[101] = var101;
+    f_log_intermediate[102] = var102;
+    f_log_intermediate[103] = var103_normal_x;
+    f_log_intermediate[104] = var104_small_b_y;
+    f_log_intermediate[105] = var105;
+    f_log_intermediate[106] = var106;
+    f_log_intermediate[107] = var107;
+    f_log_intermediate[108] = var108;
+    f_log_intermediate[109] = var109;
+    f_log_intermediate[110] = var110;
+    f_log_intermediate[111] = var111_cross_tangent_z;
+    f_log_intermediate[112] = var112;
+    f_log_intermediate[113] = var113;
+    f_log_intermediate[114] = var114;
+    f_log_intermediate[115] = var115;
+    f_log_intermediate[116] = var116_small_t_z;
+    f_log_intermediate[117] = var117;
+    f_log_intermediate[118] = var118;
+    f_log_intermediate[119] = var119;
+    f_log_intermediate[120] = var120_small_b_z;
+    f_log_intermediate[121] = var121;
+    f_log_intermediate[122] = var122;
+    f_log_intermediate[123] = var123;
+    f_log_intermediate[124] = var124__log_light_dir_y;
+    f_log_intermediate[125] = var125__log_normal_y;
+    f_log_intermediate[126] = var126_light_dir_y;
+    f_log_intermediate[127] = var127_unit_new_normal_y;
+    f_log_intermediate[128] = var128;
+    f_log_intermediate[129] = var129__log_light_dir_z;
+    f_log_intermediate[130] = var130__log_normal_z;
+    f_log_intermediate[131] = var131_light_dir_z;
+    f_log_intermediate[132] = var132_unit_new_normal_z;
+    f_log_intermediate[133] = var133;
+    f_log_intermediate[134] = var134;
+    f_log_intermediate[135] = var135;
+    f_log_intermediate[136] = var136;
+    f_log_intermediate[137] = var137_our_sign;
+    f_log_intermediate[138] = var138__log_specular_intensity;
+    f_log_intermediate[139] = var139;
+    f_log_intermediate[140] = var140_max;
+    f_log_intermediate[141] = var141;
+    f_log_intermediate[142] = var142;
+    f_log_intermediate[143] = var143;
+    f_log_intermediate[144] = var144;
+    f_log_intermediate[145] = var145;
+    f_log_intermediate[146] = var146__log_R_x;
+    f_log_intermediate[147] = var147__log_viewer_dir_x;
+    f_log_intermediate[148] = var148;
+    f_log_intermediate[149] = var149;
+    f_log_intermediate[150] = var150;
+    f_log_intermediate[151] = var151__log_LN;
+    f_log_intermediate[152] = var152;
+    f_log_intermediate[153] = var153__log_R_y;
+    f_log_intermediate[154] = var154__log_viewer_dir_y;
+    f_log_intermediate[155] = var155;
+    f_log_intermediate[156] = var156;
+    f_log_intermediate[157] = var157;
+    f_log_intermediate[158] = var158__log_R_z;
+    f_log_intermediate[159] = var159__log_viewer_dir_z;
+    f_log_intermediate[160] = var160;
+    f_log_intermediate[161] = var161;
+    f_log_intermediate[162] = var162;
+    f_log_intermediate[163] = var163;
+    f_log_intermediate[164] = var164__log_modulation1;
+    f_log_intermediate[165] = var165;
+    f_log_intermediate[166] = var166;
+    f_log_intermediate[167] = var167;
+    f_log_intermediate[168] = var168_our_sign;
+    f_log_intermediate[169] = var169;
+    f_log_intermediate[170] = var170_sin;
+    f_log_intermediate[171] = var171;
+    f_log_intermediate[172] = var172__log_xarg;
+    f_log_intermediate[173] = var173;
+    f_log_intermediate[174] = var174__log_tex_coords_x;
+    f_log_intermediate[175] = var175;
+    f_log_intermediate[176] = var176;
+    f_log_intermediate[177] = var177_scale;
+    f_log_intermediate[178] = var178;
+    f_log_intermediate[179] = var179;
+    f_log_intermediate[180] = var180_new_normal_ref_z;
+    f_log_intermediate[181] = var181;
+    f_log_intermediate[182] = var182;
+    f_log_intermediate[183] = var183;
+    f_log_intermediate[184] = var184;
+    f_log_intermediate[185] = var185;
+    f_log_intermediate[186] = var186;
+    f_log_intermediate[187] = var187;
+    f_log_intermediate[188] = var188;
+    f_log_intermediate[189] = var189;
+    f_log_intermediate[190] = var190;
+    f_log_intermediate[191] = var191;
+    f_log_intermediate[192] = var192;
+    f_log_intermediate[193] = var193;
+    f_log_intermediate[194] = var194;
+    f_log_intermediate[195] = var195;
+    f_log_intermediate[196] = var196;
+    f_log_intermediate[197] = var197;
+    f_log_intermediate[198] = var198;
+    f_log_intermediate[199] = var199;
+    f_log_intermediate[200] = var200;
+    f_log_intermediate[201] = var201;
+    f_log_intermediate[202] = var202;
+    f_log_intermediate[203] = var203;
+    f_log_intermediate[204] = var204;
+    f_log_intermediate[205] = var205;
+    f_log_intermediate[206] = var206;
+    f_log_intermediate[207] = var207;
+    f_log_intermediate[208] = var208;
+    f_log_intermediate[209] = var209;
+    f_log_intermediate[210] = var210;
+    f_log_intermediate[211] = var211;
+    f_log_intermediate[212] = var212;
+    f_log_intermediate[213] = var213;
+    f_log_intermediate[214] = var214;
+    f_log_intermediate[215] = var215;
+    f_log_intermediate[216] = var216;
+    f_log_intermediate[217] = var217;
+    f_log_intermediate[218] = var218;
+    f_log_intermediate[219] = var219;
+    f_log_intermediate[220] = var220;
+    f_log_intermediate[221] = var221;
+    f_log_intermediate[222] = var222;
+    f_log_intermediate[223] = var223;
+    f_log_intermediate[224] = var224_sin;
+    f_log_intermediate[225] = var225__log_yarg;
+    f_log_intermediate[226] = var226__log_tex_coords_y;
+    f_log_intermediate[227] = var227;
+    f_log_intermediate[228] = var228;
+    f_log_intermediate[229] = var229;
+    f_log_intermediate[230] = var230;
+    f_log_intermediate[231] = var231;
+    f_log_intermediate[232] = var232;
+    f_log_intermediate[233] = var233;
+    f_log_intermediate[234] = var234;
+    f_log_intermediate[235] = var235;
+    f_log_intermediate[236] = var236;
+    f_log_intermediate[237] = var237;
+    f_log_intermediate[238] = var238;
+    f_log_intermediate[239] = var239;
+    f_log_intermediate[240] = var240;
+    f_log_intermediate[241] = var241;
+    f_log_intermediate[242] = var242;
+    f_log_intermediate[243] = var243;
+    f_log_intermediate[244] = var244;
+    f_log_intermediate[245] = var245;
+    f_log_intermediate[246] = var246;
+    f_log_intermediate[247] = var247_cos;
+    f_log_intermediate[248] = var248;
+    f_log_intermediate[249] = var249_our_select;
+    f_log_intermediate[250] = var250__log_output_intensity_g;
+    f_log_intermediate[251] = var251;
+    f_log_intermediate[252] = var252;
+    f_log_intermediate[253] = var253__log_diffuse_sum_y;
+    f_log_intermediate[254] = var254_our_select;
+    f_log_intermediate[255] = var255__log_output_intensity_b;
+    f_log_intermediate[256] = var256;
+    f_log_intermediate[257] = var257;
+    f_log_intermediate[258] = var258__log_diffuse_sum_z;
+    return
+
 def lrelu(x):
     return tf.maximum(x*0.2,x)
 
@@ -35,6 +678,7 @@ actual_conv_channel = conv_channel
 
 dilation_remove_large = False
 dilation_clamp_large = False
+dilation_remove_layer = False
 dilation_threshold = 8
 
 def build(input, ini_id=True, regularizer_scale=0.0, share_weights=False, final_layer_channels=-1):
@@ -55,6 +699,8 @@ def build(input, ini_id=True, regularizer_scale=0.0, share_weights=False, final_
                 dilation_rate = 1
             elif dilation_clamp_large:
                 dilation_rate = dilation_threshold
+            elif dilation_remove_layer:
+                continue
         print('rate is', dilation_rate)
         net=slim.conv2d(net,actual_conv_channel,[3,3],rate=dilation_rate,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv'+str(conv_ind),weights_regularizer=regularizer)
 #    net=slim.conv2d(net,24,[3,3],rate=128,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv8')
@@ -196,6 +842,7 @@ def main():
     parser.add_argument('--dilation_remove_large', dest='dilation_remove_large', action='store_true', help='when specified, use ordinary conv layer instead of dilated conv layer with large dilation rate')
     parser.add_argument('--dilation_clamp_large', dest='dilation_clamp_large', action='store_true', help='when specified, clamp large dilation rate to a give threshold')
     parser.add_argument('--dilation_threshold', dest='dilation_threshold', type=int, default=8, help='threshold used to remove or clamp dilation')
+    parser.add_argument('--dilation_remove_layer', dest='dilation_remove_layer', action='store_true', help='when specified, use less dilated conv layers')
     
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -223,6 +870,7 @@ def main():
     parser.set_defaults(add_final_layers=False)
     parser.set_defaults(dilation_remove_large=False)
     parser.set_defaults(dilation_clamp_large=False)
+    parser.set_defaults(dilation_remove_layer=False)
     
     args = parser.parse_args()
     
@@ -240,6 +888,7 @@ def copy_option(args):
     delattr(new_args, 'collect_validate_loss')
     delattr(new_args, 'collect_validate_while_training')
     delattr(new_args, 'clip_weights_percentage_after_normalize')
+    delattr(new_args, 'debug_mode')
     return new_args
     
 def main_network(args):
@@ -275,6 +924,9 @@ def main_network(args):
     
     assert not (args.share_weights and args.feature_reduction_channel_by_samples)
     
+    global batch_norm_is_training
+    batch_norm_is_training = args.is_train
+    
     global actual_conv_channel
     actual_conv_channel *= args.conv_channel_multiplier
     if args.initial_layer_channels < 0:
@@ -284,11 +936,13 @@ def main_network(args):
         
     global dilation_threshold
     dilation_threshold = args.dilation_threshold
-    assert (not args.dilation_clamp_large) or (not args.dilation_remove_large)
+    assert (not args.dilation_clamp_large) or (not args.dilation_remove_large) or (not args.dilation_remove_layer)
     global dilation_clamp_large
     dilation_clamp_large = args.dilation_clamp_large
     global dilation_remove_large
     dilation_remove_large = args.dilation_remove_large
+    global dilation_remove_layer
+    dilation_remove_layer = args.dilation_remove_layer
         
     if not args.add_final_layers:
         args.final_layer_channels = -1
@@ -348,7 +1002,10 @@ def main_network(args):
         ini_id = False
     orig_channel = None
     alpha = tf.placeholder(tf.float32)
-    input_to_network = input
+    if not args.debug_mode:
+        input_to_network = input
+    else:
+        input_to_network = get_tensors()
     alpha_val = 1.0
 
     if args.finetune:
@@ -716,6 +1373,38 @@ def main_network(args):
     
     if not args.is_train:
     
+        if args.debug_mode:
+            if not os.path.isdir("%s/debug"%args.name):
+                os.makedirs("%s/debug"%args.name)
+            if args.generate_timeline:
+                run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+                run_metadata = tf.RunMetadata()
+            else:
+                run_options = None
+                run_metadata = None
+            #builder = tf.profiler.ProfileOptionBuilder
+            #opts = builder(builder.time_and_memory()).order_by('micros').build()
+            #with tf.contrib.tfprof.ProfileContext('/tmp/train_dir', trace_steps=[], dump_steps=[]) as pctx:
+            if True:
+                for i in range(10):
+                    #pctx.trace_next_step()
+                    #pctx.dump_next_step()
+                    st = time.time()
+                    output_image = sess.run(network, options=run_options, run_metadata=run_metadata)
+                    st2 = time.time()
+                    print("rough time estimate:", st2 - st)
+                    #pctx.profiler.profile_operations(options=opts)
+                    output_image=np.minimum(np.maximum(output_image,0.0),1.0)*255.0
+                    if args.use_queue:
+                        output_image = output_image[:, :, :, ::-1]
+                    cv2.imwrite("%s/%06d.png"%("%s/debug"%(args.name), i+1),np.uint8(output_image[0,:,:,:]))
+                    if args.generate_timeline:
+                        fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+                        chrome_trace = fetched_timeline.generate_chrome_trace_format()
+                        with open("%s/debug/%d.json"%(args.name, i+1), 'w') as f:
+                            f.write(chrome_trace)
+            return
+    
         if args.collect_validate_loss:
             assert not args.test_training
             dirs = sorted(os.listdir(args.name))
@@ -906,7 +1595,7 @@ def main_network(args):
     sess.close()
     
     if not args.is_train:
-        os.system('source activate pytorch36 && CUDA_VISIBLE_DEVICES=1, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir) 
+        os.system('source activate pytorch36 && CUDA_VISIBLE_DEVICES=2, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir) 
             
 if __name__ == '__main__':
     main()
