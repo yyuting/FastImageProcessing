@@ -10,12 +10,14 @@ import pickle
 from tensorflow.python.client import timeline
 import copy
 from shaders import *
+import sys; sys.path += ['../../global_opt/proj/apps']
+import compiler_problem
 
 allowed_dtypes = ['float64', 'float32', 'uint8']
 no_L1_reg_other_layers = True
 
-width = 960
-height = 640
+width = 500
+height = 400
 
 dtype=tf.float64
 
@@ -51,68 +53,76 @@ def get_tensors(dataroot, camera_pos, shader_time, output_type='remove_constant'
     #height = 640
     
     #samples = [all_features[-2, :, :], all_features[-1, :, :]]
-    features = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name)
     
-    with tf.variable_scope("auxiliary"):
-        valid_inds = []
+    if shader_name == 'zigzag':
+        color_inds = [0, 249, 254]
+    elif shader_name == 'sin_quadratic':
+        color_inds = [0, 242, 251]
+    elif shader_name == 'bricks':
+        color_inds = [0, 105, 120]
         
-        feature_ind = 0
-        for i in range(len(features)):
-            if isinstance(features[i], (float, int)):
-                continue
+    features = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, color_inds=color_inds)
+        
+    color_features = [features[i] for i in range(len(features)) if i in color_inds]
+    with tf.control_dependencies(color_features):
+        with tf.variable_scope("auxiliary"):
+            valid_inds = []
+            
+            feature_ind = 0
+            for i in range(len(features)):
+                if isinstance(features[i], (float, int)):
+                    continue
+                else:
+                    #features[i] = tf.clip_by_value(features[i], Q1[feature_ind] - tolerance * IQR[feature_ind], Q3[feature_ind] + tolerance * IQR[feature_ind])
+                    #features[i] += feature_bias[feature_ind]
+                    #features[i] *= feature_scale[feature_ind]
+                    
+                    #features[i] = tf.clip_by_value(features[i], 0.0, 1.0)
+                    feature_ind += 1
+                #features[i] += feature_bias[i]
+                #features[i] *= feature_scale[i]
+                #if isinstance(features[i], (float, int)):
+                #    features[i] = tf.constant(features[i], dtype=dtype, shape=(height, width))
+                #    continue
+                valid_inds.append(i)
+                #features[i] += feature_bias[i]
+                #features[i] *= feature_scale[i]
+            #features = tf.expand_dims(tf.stack(features, axis=2), axis=0)
+
+            #if not all_features_only:
+            #    features_dummy = tf.stack([features[0], features[250], features[255]], axis=2)
+            #    features_dummy_list = tf.unstack(features_dummy, axis=2)
+            #    features[0] = features_dummy_list[0]
+            #    features[250] = features_dummy_list[1]
+            #    features[255] = features_dummy_list[2]
+
+            if output_type == 'remove_constant':
+                features = tf.cast(tf.stack([features[k] for k in valid_inds], axis=3), tf.float32)
+            elif output_type == 'all':
+                features = tf.cast(tf.stack(features, axis=3), tf.float32)
+            elif output_type == 'rgb':
+                features = tf.cast(tf.stack([features[k] for k in color_inds], axis=3), tf.float32)
             else:
-                #features[i] = tf.clip_by_value(features[i], Q1[feature_ind] - tolerance * IQR[feature_ind], Q3[feature_ind] + tolerance * IQR[feature_ind])
-                #features[i] += feature_bias[feature_ind]
-                #features[i] *= feature_scale[feature_ind]
-                
-                #features[i] = tf.clip_by_value(features[i], 0.0, 1.0)
-                feature_ind += 1
-            #features[i] += feature_bias[i]
-            #features[i] *= feature_scale[i]
-            #if isinstance(features[i], (float, int)):
-            #    features[i] = tf.constant(features[i], dtype=dtype, shape=(height, width))
-            #    continue
-            valid_inds.append(i)
-            #features[i] += feature_bias[i]
-            #features[i] *= feature_scale[i]
-        #features = tf.expand_dims(tf.stack(features, axis=2), axis=0)
-
-        #if not all_features_only:
-        #    features_dummy = tf.stack([features[0], features[250], features[255]], axis=2)
-        #    features_dummy_list = tf.unstack(features_dummy, axis=2)
-        #    features[0] = features_dummy_list[0]
-        #    features[250] = features_dummy_list[1]
-        #    features[255] = features_dummy_list[2]
-
-        if output_type == 'remove_constant':
-            features = tf.cast(tf.stack([features[k] for k in valid_inds], axis=3), tf.float32)
-        elif output_type == 'all':
-            features = tf.cast(tf.stack(features, axis=3), tf.float32)
-        elif output_type == 'rgb':
-            if shader_name == 'zigzag':
-                color_inds = [0, 249, 254]
-            elif shader_name == 'sin_quadratic':
-                color_inds = [0, 242, 251]
-            features = tf.cast(tf.stack([features[k] for k in color_inds], axis=3), tf.float32)
-        else:
-            raise
-        
-        if output_type != 'rgb':
-            features += feature_bias
-            features *= feature_scale
-            features = tf.clip_by_value(features, 0.0, 1.0)
-        return features
+                raise
+            
+            if output_type != 'rgb':
+                features += feature_bias
+                features *= feature_scale
+                features = tf.clip_by_value(features, 0.0, 1.0)
+    return features
     
     #numpy.save('valid_inds.npy', valid_inds)
     #return features
 
-def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag'):
+def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, vec_output=None):
     if shader_name == 'zigzag':
         features_len = 266
     elif shader_name == 'sin_quadratic':
         features_len = 267
     elif shader_name == 'bricks':
         features_len = 142
+    elif shader_name == 'compiler_problem':
+        features_len = compiler_problem.f_log_intermediate_len + 7
     f_log_intermediate = [None] * features_len
     xv, yv = numpy.meshgrid(numpy.arange(width), numpy.arange(height), indexing='ij')
     xv = np.transpose(xv)
@@ -135,37 +145,47 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
         sample2 = samples[1].astype(np.float64)
     
     vector3 = [tensor_x0 + 0.5 * sample1, tensor_x1 + 0.5 * sample2, tensor_x2]
-    get_shader(vector3, f_log_intermediate, camera_pos, features_len, shader_name=shader_name)
+    get_shader(vector3, f_log_intermediate, camera_pos, features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output)
     
     f_log_intermediate[features_len-2] = sample1
     f_log_intermediate[features_len-1] = sample2
     
     return f_log_intermediate
 
-def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zigzag'):
+def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zigzag', color_inds=None, vec_output=None):
     features = get_features(x, camera_pos)
+    if vec_output is None:
+        vec_output = [None] * 3
     if shader_name == 'zigzag':
         zigzag_f(features, f_log_intermediate)
     elif shader_name == 'sin_quadratic':
         sin_quadratic_f(features, f_log_intermediate)
     elif shader_name == 'bricks':
         bricks_f(features, f_log_intermediate)
+    elif shader_name == 'compiler_problem':
+        compiler_problem.f(features, f_log_intermediate, vec_output)
     else:
         raise
+        
+    if color_inds is None:
+        color_features = None
+    else:
+        color_features = [f_log_intermediate[i] for i in range(len(f_log_intermediate)) if i in color_inds]
     
-    with tf.variable_scope("auxiliary"):
-        h = 1e-8
-        features_neg = get_features([x[0]-h, x[1], x[2]], camera_pos)
-        features_pos = get_features([x[0]+h, x[1], x[2]], camera_pos)
-        f_log_intermediate[features_len-7] = (features_pos[1] - features_neg[1]) / (2 * h)
-        f_log_intermediate[features_len-6] = (features_pos[2] - features_neg[2]) / (2 * h)
-        
-        features_neg = get_features([x[0], x[1]-h, x[2]], camera_pos)
-        features_pos = get_features([x[0], x[1]+h, x[2]], camera_pos)
-        f_log_intermediate[features_len-5] = (features_pos[1] - features_neg[1]) / (2 * h)
-        f_log_intermediate[features_len-4] = (features_pos[2] - features_neg[2]) / (2 * h)
-        
-        f_log_intermediate[features_len-3] = f_log_intermediate[features_len-7] * f_log_intermediate[features_len-4] - f_log_intermediate[features_len-6] * f_log_intermediate[features_len-5]
+    with tf.control_dependencies(color_features):
+        with tf.variable_scope("auxiliary"):
+            h = 1e-8
+            features_neg = get_features([x[0]-h, x[1], x[2]], camera_pos)
+            features_pos = get_features([x[0]+h, x[1], x[2]], camera_pos)
+            f_log_intermediate[features_len-7] = (features_pos[1] - features_neg[1]) / (2 * h)
+            f_log_intermediate[features_len-6] = (features_pos[2] - features_neg[2]) / (2 * h)
+            
+            features_neg = get_features([x[0], x[1]-h, x[2]], camera_pos)
+            features_pos = get_features([x[0], x[1]+h, x[2]], camera_pos)
+            f_log_intermediate[features_len-5] = (features_pos[1] - features_neg[1]) / (2 * h)
+            f_log_intermediate[features_len-4] = (features_pos[2] - features_neg[2]) / (2 * h)
+            
+            f_log_intermediate[features_len-3] = f_log_intermediate[features_len-7] * f_log_intermediate[features_len-4] - f_log_intermediate[features_len-6] * f_log_intermediate[features_len-5]
     return
     
 def get_features(x, camera_pos):
@@ -601,111 +621,112 @@ def main_network(args):
             print("sample count", shader_samples)
             input_to_network = get_tensors(args.dataroot, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name)
     
-    if args.debug_mode and args.mean_estimator:
-        with tf.variable_scope("shader"):
-            network = tf.reduce_mean(input_to_network, axis=0, keep_dims=True)
-            if not args.full_resolution:
-                network = tf.image.resize_images(network, tf.stack([tf.shape(input_to_network)[1] * args.upsample_scale, tf.shape(input_to_network)[2] * args.upsample_scale]), method=tf.image.ResizeMethod.NEAREST_NEIGHBOR if not args.bilinear_upsampling else tf.image.ResizeMethod.BILINEAR)
-        regularizer_loss = 0
-    else:
-        if args.input_nc <= actual_conv_channel:
-            ini_id = True
+    with tf.control_dependencies([input_to_network]):
+        if args.debug_mode and args.mean_estimator:
+            with tf.variable_scope("shader"):
+                network = tf.reduce_mean(input_to_network, axis=0, keep_dims=True)
+                if not args.full_resolution:
+                    network = tf.image.resize_images(network, tf.stack([tf.shape(input_to_network)[1] * args.upsample_scale, tf.shape(input_to_network)[2] * args.upsample_scale]), method=tf.image.ResizeMethod.NEAREST_NEIGHBOR if not args.bilinear_upsampling else tf.image.ResizeMethod.BILINEAR)
+            regularizer_loss = 0
         else:
-            ini_id = False
-        orig_channel = None
-        alpha = tf.placeholder(tf.float32)
-        alpha_val = 1.0
-
-        if args.finetune:
-            orig_channel = args.orig_channel.split(',')
-            orig_channel = [int(i) for i in orig_channel]
-            input_stacks = []
-            for i in range(args.input_nc):
-                ind = i % nfeatures
-                if ind in orig_channel:
-                    input_stacks.append(input[:, :, :, i])
-                else:
-                    input_stacks.append(input[:, :, :, i] * alpha)
-            input_to_network = tf.stack(input_stacks, axis=3)
-            
-        if args.clip_weights_percentage_after_normalize > 0.0:
-            assert args.encourage_sparse_features
-            assert not args.is_train
-        
-            replace_normalize_weights = tf.placeholder(tf.bool)
-            normalize_weights = tf.placeholder(tf.float32,shape=[1, 1, args.input_nc, actual_conv_channel])
-        else:
-            replace_normalize_weights = None
-            normalize_weights = None
-        
-        regularizer_loss = 0
-        manual_regularize = args.rowwise_L2_normalize or args.Frobenius_normalize
-        if args.encourage_sparse_features:
-            regularizer = None
-            if (args.regularizer_scale > 0 or args.L2_regularizer_scale > 0) and not manual_regularize:
-                regularizer = slim.l1_l2_regularizer(scale_l1=args.regularizer_scale, scale_l2=args.L2_regularizer_scale)
-            actual_initial_layer_channels = args.initial_layer_channels
-            actual_nfeatures = nfeatures
-            if args.feature_reduction_channel_by_samples:
-                actual_initial_layer_channels *= args.nsamples
-                actual_nfeatures = args.input_nc
-            with tf.variable_scope("feature_reduction"):
-                weights = tf.get_variable('w0', [1, 1, actual_nfeatures, actual_initial_layer_channels], initializer=tf.contrib.layers.xavier_initializer(), regularizer=regularizer)
-                if args.normalize_weights:
-                    if args.abs_normalize:
-                        column_sum = tf.reduce_sum(tf.abs(weights), [0, 1, 2])
-                    elif args.rowwise_L2_normalize:
-                        column_sum = tf.reduce_sum(tf.abs(tf.square(weights)), [0, 1, 2])
-                    elif args.Frobenius_normalize:
-                        column_sum = tf.reduce_sum(tf.abs(tf.square(weights)))
-                    else:
-                        column_sum = tf.reduce_sum(weights, [0, 1, 2])
-                    weights_to_input = weights / column_sum
-                    if args.clip_weights_percentage_after_normalize:
-                        weights_to_input = tf.cond(replace_normalize_weights, lambda: normalize_weights, lambda: weights_to_input)
-                else:
-                    weights_to_input = weights
-                    
-                input_to_network = tf.nn.conv2d(input_to_network, weights_to_input, [1, 1, 1, 1], "SAME")
-                if manual_regularize:
-                    regularizer_loss = args.regularizer_scale * tf.reduce_mean(tf.abs(weights_to_input))
-                if actual_initial_layer_channels <= actual_conv_channel:
-                    ini_id = True
-                else:
-                    ini_id = False
-            if args.add_initial_layers:
-                for nlayer in range(3):
-                    input_to_network = slim.conv2d(input_to_network, actual_initial_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(), scope='initial_'+str(nlayer), weights_regularizer=regularizer)
-            
-        if deconv_layers > 0:
-            if args.deconv:
-                regularizer = None
-                if not no_L1_reg_other_layers and args.regularizer_scale > 0.0:
-                    regularizer = slim.l1_regularizer(args.regularizer_scale)
-                out_feature = args.input_nc if not args.encourage_sparse_features else actual_conv_channel
-                if not args.upsample_single:
-                    if args.upsample_shrink_feature:
-                        assert not args.encourage_sparse_features
-                        out_feature = min(args.input_nc, actual_conv_channel)
-                        ini_id = True
-                    for i in range(deconv_layers):
-                        input_to_network = slim.conv2d_transpose(input_to_network, out_feature, 3, stride=2, weights_initializer=identity_initializer(), scope='deconv'+str(i+1), weights_regularizer=regularizer)
-                else:
-                    upsample_stacks = []
-                    for c in range(out_feature):
-                        current_channel = tf.expand_dims(input_to_network[:, :, :, c], axis=3)
-                        for i in range(deconv_layers):
-                            current_channel = slim.conv2d_transpose(current_channel, 1, 3, stride=2, weights_initializer=identity_initializer(), scope='deconv'+str(c+1)+str(i+1), weights_regularizer=regularizer)
-                        upsample_stacks.append(tf.squeeze(current_channel, axis=3))
-                    input_to_network = tf.stack(upsample_stacks, axis=3)
+            if args.input_nc <= actual_conv_channel:
+                ini_id = True
             else:
-                input_to_network = tf.image.resize_images(input_to_network, tf.stack([tf.shape(input_to_network)[1] * args.upsample_scale, tf.shape(input_to_network)[2] * args.upsample_scale]), method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+                ini_id = False
+            orig_channel = None
+            alpha = tf.placeholder(tf.float32)
+            alpha_val = 1.0
+
+            if args.finetune:
+                orig_channel = args.orig_channel.split(',')
+                orig_channel = [int(i) for i in orig_channel]
+                input_stacks = []
+                for i in range(args.input_nc):
+                    ind = i % nfeatures
+                    if ind in orig_channel:
+                        input_stacks.append(input[:, :, :, i])
+                    else:
+                        input_stacks.append(input[:, :, :, i] * alpha)
+                input_to_network = tf.stack(input_stacks, axis=3)
                 
-        network=build(input_to_network, ini_id, regularizer_scale=args.regularizer_scale, share_weights=args.share_weights, final_layer_channels=args.final_layer_channels)
+            if args.clip_weights_percentage_after_normalize > 0.0:
+                assert args.encourage_sparse_features
+                assert not args.is_train
+            
+                replace_normalize_weights = tf.placeholder(tf.bool)
+                normalize_weights = tf.placeholder(tf.float32,shape=[1, 1, args.input_nc, actual_conv_channel])
+            else:
+                replace_normalize_weights = None
+                normalize_weights = None
+            
+            regularizer_loss = 0
+            manual_regularize = args.rowwise_L2_normalize or args.Frobenius_normalize
+            if args.encourage_sparse_features:
+                regularizer = None
+                if (args.regularizer_scale > 0 or args.L2_regularizer_scale > 0) and not manual_regularize:
+                    regularizer = slim.l1_l2_regularizer(scale_l1=args.regularizer_scale, scale_l2=args.L2_regularizer_scale)
+                actual_initial_layer_channels = args.initial_layer_channels
+                actual_nfeatures = nfeatures
+                if args.feature_reduction_channel_by_samples:
+                    actual_initial_layer_channels *= args.nsamples
+                    actual_nfeatures = args.input_nc
+                with tf.variable_scope("feature_reduction"):
+                    weights = tf.get_variable('w0', [1, 1, actual_nfeatures, actual_initial_layer_channels], initializer=tf.contrib.layers.xavier_initializer(), regularizer=regularizer)
+                    if args.normalize_weights:
+                        if args.abs_normalize:
+                            column_sum = tf.reduce_sum(tf.abs(weights), [0, 1, 2])
+                        elif args.rowwise_L2_normalize:
+                            column_sum = tf.reduce_sum(tf.abs(tf.square(weights)), [0, 1, 2])
+                        elif args.Frobenius_normalize:
+                            column_sum = tf.reduce_sum(tf.abs(tf.square(weights)))
+                        else:
+                            column_sum = tf.reduce_sum(weights, [0, 1, 2])
+                        weights_to_input = weights / column_sum
+                        if args.clip_weights_percentage_after_normalize:
+                            weights_to_input = tf.cond(replace_normalize_weights, lambda: normalize_weights, lambda: weights_to_input)
+                    else:
+                        weights_to_input = weights
                         
-        if args.share_weights:
-            assert not args.use_batch
-            #loss = tf.reduce_mean(tf.square(tf.reduce_mean(network, 0) - tf.squeeze(output)))
+                    input_to_network = tf.nn.conv2d(input_to_network, weights_to_input, [1, 1, 1, 1], "SAME")
+                    if manual_regularize:
+                        regularizer_loss = args.regularizer_scale * tf.reduce_mean(tf.abs(weights_to_input))
+                    if actual_initial_layer_channels <= actual_conv_channel:
+                        ini_id = True
+                    else:
+                        ini_id = False
+                if args.add_initial_layers:
+                    for nlayer in range(3):
+                        input_to_network = slim.conv2d(input_to_network, actual_initial_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(), scope='initial_'+str(nlayer), weights_regularizer=regularizer)
+                
+            if deconv_layers > 0:
+                if args.deconv:
+                    regularizer = None
+                    if not no_L1_reg_other_layers and args.regularizer_scale > 0.0:
+                        regularizer = slim.l1_regularizer(args.regularizer_scale)
+                    out_feature = args.input_nc if not args.encourage_sparse_features else actual_conv_channel
+                    if not args.upsample_single:
+                        if args.upsample_shrink_feature:
+                            assert not args.encourage_sparse_features
+                            out_feature = min(args.input_nc, actual_conv_channel)
+                            ini_id = True
+                        for i in range(deconv_layers):
+                            input_to_network = slim.conv2d_transpose(input_to_network, out_feature, 3, stride=2, weights_initializer=identity_initializer(), scope='deconv'+str(i+1), weights_regularizer=regularizer)
+                    else:
+                        upsample_stacks = []
+                        for c in range(out_feature):
+                            current_channel = tf.expand_dims(input_to_network[:, :, :, c], axis=3)
+                            for i in range(deconv_layers):
+                                current_channel = slim.conv2d_transpose(current_channel, 1, 3, stride=2, weights_initializer=identity_initializer(), scope='deconv'+str(c+1)+str(i+1), weights_regularizer=regularizer)
+                            upsample_stacks.append(tf.squeeze(current_channel, axis=3))
+                        input_to_network = tf.stack(upsample_stacks, axis=3)
+                else:
+                    input_to_network = tf.image.resize_images(input_to_network, tf.stack([tf.shape(input_to_network)[1] * args.upsample_scale, tf.shape(input_to_network)[2] * args.upsample_scale]), method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+                    
+            network=build(input_to_network, ini_id, regularizer_scale=args.regularizer_scale, share_weights=args.share_weights, final_layer_channels=args.final_layer_channels)
+                            
+            if args.share_weights:
+                assert not args.use_batch
+                #loss = tf.reduce_mean(tf.square(tf.reduce_mean(network, 0) - tf.squeeze(output)))
     
     loss=tf.reduce_mean(tf.square(network-output))
     avg_loss = 0

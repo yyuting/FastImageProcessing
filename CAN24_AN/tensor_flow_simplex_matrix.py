@@ -127,7 +127,7 @@ def calculate_image(noise_values, phases, shape):
     , phases, 2)) + 1.0) * 128)
     return tf.concat([val, val, val], 2)
     
-def simplex_noise(x, y):
+def simplex_noise_2arg(x, y):
     phases = 10.0
     xx = tf.tile(tf.expand_dims(x, axis=3), [1, 1, 1, int(phases)])
     xx *= tf.cast(tf.pow(2.0, tf.linspace(0.0, (phases - 1), int(phases))), tf.float64)

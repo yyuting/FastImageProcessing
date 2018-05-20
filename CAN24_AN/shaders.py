@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensor_flow_simplex_matrix import simplex_noise
+from util import simplex_noise
 import numpy
 
 def tf_np_sign(x):
