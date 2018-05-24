@@ -133,6 +133,11 @@ def simplex_noise_2arg(x, y):
     xx *= tf.cast(tf.pow(2.0, tf.linspace(0.0, (phases - 1), int(phases))), tf.float64)
     yy = tf.tile(tf.expand_dims(y, axis=3), [1, 1, 1, int(phases)])
     yy *= tf.cast(tf.pow(2.0, tf.linspace(0.0, (phases - 1), int(phases))), tf.float64)
+    
+    scale = 10.0
+    xx /= scale
+    yy /= scale
+    
     zz = 10 * tf.linspace(0.0, (phases - 1), int(phases))
     zz = tf.expand_dims(tf.expand_dims(tf.expand_dims(zz, axis=0), axis=0), axis=0)
     zz = tf.cast(tf.tile(zz, [tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2], 1]), tf.float64)

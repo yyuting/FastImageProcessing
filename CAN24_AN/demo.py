@@ -12,6 +12,7 @@ import copy
 from shaders import *
 import sys; sys.path += ['../../global_opt/proj/apps']
 import compiler_problem
+from unet import unet
 
 allowed_dtypes = ['float64', 'float32', 'uint8']
 no_L1_reg_other_layers = True
@@ -26,48 +27,48 @@ batch_norm_is_training = True
 def get_tensors(dataroot, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag'):
     # 2x_1sample on margo
     #camera_pos = np.load('/localtmp/yuting/out_2x1_manual_carft/train.npy')[0, :]
-    
+
     #feature_scale = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/datas_rescaled_25_75_2_153/feature_scale.npy')
     #feature_bias = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/datas_rescaled_25_75_2_153/feature_bias.npy')
-    
+
     feature_scale = np.load(os.path.join(dataroot, 'feature_scale.npy'))
     feature_bias = np.load(os.path.join(dataroot, 'feature_bias.npy'))
-    
+
     Q1 = np.load(os.path.join(dataroot, 'Q1.npy'))
     Q3 = np.load(os.path.join(dataroot, 'Q3.npy'))
     IQR = np.load(os.path.join(dataroot, 'IQR.npy'))
     tolerance = 2.0
-    
+
     #Q1 = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/Q1.npy')
     #Q3 = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/Q3.npy')
     #IQR = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/IQR.npy')
-    
+
     # 1x_1sample on minion
     #camera_pos = np.load('/localtmp/yuting/out_1x1_manual_craft/out_1x1_manual_craft/train.npy')[0, :]
-    
+
     #feature_scale = np.load('/localtmp/yuting/out_1x1_manual_craft/out_1x1_manual_craft/train/zigzag_plane_normal_spheres/feature_scale.npy')
     #feature_bias = np.load('/localtmp/yuting/out_1x1_manual_craft/out_1x1_manual_craft/train/zigzag_plane_normal_spheres/feature_bias.npy')
     #global width
     #width = 960
     #global height
     #height = 640
-    
+
     #samples = [all_features[-2, :, :], all_features[-1, :, :]]
-    
+
     if shader_name == 'zigzag':
         color_inds = [0, 249, 254]
     elif shader_name == 'sin_quadratic':
         color_inds = [0, 242, 251]
     elif shader_name == 'bricks':
         color_inds = [0, 105, 120]
-        
+
     features = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, color_inds=color_inds)
-        
+
     color_features = [features[i] for i in range(len(features)) if i in color_inds]
     with tf.control_dependencies(color_features):
         with tf.variable_scope("auxiliary"):
             valid_inds = []
-            
+
             feature_ind = 0
             for i in range(len(features)):
                 if isinstance(features[i], (float, int)):
@@ -76,7 +77,7 @@ def get_tensors(dataroot, camera_pos, shader_time, output_type='remove_constant'
                     #features[i] = tf.clip_by_value(features[i], Q1[feature_ind] - tolerance * IQR[feature_ind], Q3[feature_ind] + tolerance * IQR[feature_ind])
                     #features[i] += feature_bias[feature_ind]
                     #features[i] *= feature_scale[feature_ind]
-                    
+
                     #features[i] = tf.clip_by_value(features[i], 0.0, 1.0)
                     feature_ind += 1
                 #features[i] += feature_bias[i]
@@ -104,17 +105,18 @@ def get_tensors(dataroot, camera_pos, shader_time, output_type='remove_constant'
                 features = tf.cast(tf.stack([features[k] for k in color_inds], axis=3), tf.float32)
             else:
                 raise
-            
+
             if output_type != 'rgb':
                 features += feature_bias
                 features *= feature_scale
                 features = tf.clip_by_value(features, 0.0, 1.0)
     return features
-    
+
     #numpy.save('valid_inds.npy', valid_inds)
     #return features
 
-def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, vec_output=None):
+def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None):
+    vec_output_len = 3
     if shader_name == 'zigzag':
         features_len = 266
     elif shader_name == 'sin_quadratic':
@@ -123,7 +125,16 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
         features_len = 142
     elif shader_name == 'compiler_problem':
         features_len = compiler_problem.f_log_intermediate_len + 7
+        vec_output_len = compiler_problem.vec_output_len
     f_log_intermediate = [None] * features_len
+    vec_output = [None] * vec_output_len
+
+    if render_size is not None:
+        global width
+        global height
+        width = render_size[0]
+        height = render_size[1]
+
     xv, yv = numpy.meshgrid(numpy.arange(width), numpy.arange(height), indexing='ij')
     xv = np.transpose(xv)
     yv = np.transpose(yv)
@@ -134,7 +145,7 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     tensor_x0 = tf.constant(xv, dtype=dtype)
     tensor_x1 = tf.constant(yv, dtype=dtype)
     tensor_x2 = shader_time * tf.constant(1.0, dtype=dtype, shape=xv.shape)
-    
+
     if samples is None:
         sample1 = tf.random_normal(xv.shape, dtype=dtype)
         sample2 = tf.random_normal(xv.shape, dtype=dtype)
@@ -143,14 +154,19 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
         #sample2 = tf.constant(samples[1], dtype=dtype)
         sample1 = samples[0].astype(np.float64)
         sample2 = samples[1].astype(np.float64)
-    
-    vector3 = [tensor_x0 + 0.5 * sample1, tensor_x1 + 0.5 * sample2, tensor_x2]
+
+    if render_sigma is None:
+        render_sigma = [0.5, 0.5, 0.0]
+    vector3 = [tensor_x0 + render_sigma[0] * sample1, tensor_x1 + render_sigma[1] * sample2, tensor_x2]
     get_shader(vector3, f_log_intermediate, camera_pos, features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output)
-    
+
     f_log_intermediate[features_len-2] = sample1
     f_log_intermediate[features_len-1] = sample2
-    
-    return f_log_intermediate
+
+    if return_vec_output:
+        return f_log_intermediate, vec_output
+    else:
+        return f_log_intermediate
 
 def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zigzag', color_inds=None, vec_output=None):
     features = get_features(x, camera_pos)
@@ -166,12 +182,12 @@ def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zig
         compiler_problem.f(features, f_log_intermediate, vec_output)
     else:
         raise
-        
+
     if color_inds is None:
         color_features = None
     else:
         color_features = [f_log_intermediate[i] for i in range(len(f_log_intermediate)) if i in color_inds]
-    
+
     with tf.control_dependencies(color_features):
         with tf.variable_scope("auxiliary"):
             h = 1e-8
@@ -179,41 +195,41 @@ def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zig
             features_pos = get_features([x[0]+h, x[1], x[2]], camera_pos)
             f_log_intermediate[features_len-7] = (features_pos[1] - features_neg[1]) / (2 * h)
             f_log_intermediate[features_len-6] = (features_pos[2] - features_neg[2]) / (2 * h)
-            
+
             features_neg = get_features([x[0], x[1]-h, x[2]], camera_pos)
             features_pos = get_features([x[0], x[1]+h, x[2]], camera_pos)
             f_log_intermediate[features_len-5] = (features_pos[1] - features_neg[1]) / (2 * h)
             f_log_intermediate[features_len-4] = (features_pos[2] - features_neg[2]) / (2 * h)
-            
+
             f_log_intermediate[features_len-3] = f_log_intermediate[features_len-7] * f_log_intermediate[features_len-4] - f_log_intermediate[features_len-6] * f_log_intermediate[features_len-5]
     return
-    
+
 def get_features(x, camera_pos):
     ray_dir = [x[0] - width / 2, x[1] + 1, width / 2]
     ray_origin = [camera_pos[0], camera_pos[1], camera_pos[2]]
-    
+
     ray_dir_norm = tf.sqrt(ray_dir[0] **2 + ray_dir[1] ** 2 + ray_dir[2] ** 2)
     ray_dir[0] /= ray_dir_norm
     ray_dir[1] /= ray_dir_norm
     ray_dir[2] /= ray_dir_norm
-    
+
     sin1 = tf.sin(camera_pos[3]);
     cos1 = tf.cos(camera_pos[3]);
     sin2 = tf.sin(camera_pos[4]);
     cos2 = tf.cos(camera_pos[4]);
     sin3 = tf.sin(camera_pos[5]);
     cos3 = tf.cos(camera_pos[5]);
-    
+
     ray_dir_p = [cos2 * cos3 * ray_dir[0] + (-cos1 * sin3 + sin1 * sin2 * cos3) * ray_dir[1] + (sin1 * sin3 + cos1 * sin2 * cos3) * ray_dir[2],
                  cos2 * sin3 * ray_dir[0] + (cos1 * cos3 + sin1 * sin2 * sin3) * ray_dir[1] + (-sin1 * cos3 + cos1 * sin2 * sin3) * ray_dir[2],
                  -sin2 * ray_dir[0] + sin1 * cos2 * ray_dir[1] + cos1 * cos2 * ray_dir[2]]
-    
+
     N = [0, 0, 1.0]
-    
+
     light_dir = [0.22808577638091165, 0.60822873701576452, 0.76028592126970562]
-    
+
     t_ray = -ray_origin[2] / ray_dir_p[2]
-    
+
     features = [None] * 8
     features[0] = x[2]
     features[1] = ray_origin[0] + t_ray * ray_dir_p[0]
@@ -224,7 +240,7 @@ def get_features(x, camera_pos):
     features[6] = -ray_dir_p[2]
     features[7] = t_ray
     return features
-    
+
 def lrelu(x):
     return tf.maximum(x*0.2,x)
 
@@ -237,10 +253,15 @@ def identity_initializer():
         return tf.constant(array, dtype=dtype)
     return _initializer
 
+batch_norm_only = False
+
 def nm(x):
-    w0=tf.Variable(1.0,name='w0')
-    w1=tf.Variable(0.0,name='w1')
-    return w0*x+w1*slim.batch_norm(x, is_training=batch_norm_is_training) # the parameter "is_training" in slim.batch_norm does not seem to help so I do not use it
+    if not batch_norm_only:
+        w0=tf.Variable(1.0,name='w0')
+        w1=tf.Variable(0.0,name='w1')
+        return w0*x+w1*slim.batch_norm(x, is_training=batch_norm_is_training) # the parameter "is_training" in slim.batch_norm does not seem to help so I do not use it
+    else:
+        return slim.batch_norm(x, is_training=batch_norm_is_training)
 
 conv_channel = 24
 actual_conv_channel = conv_channel
@@ -258,7 +279,7 @@ def build(input, ini_id=True, regularizer_scale=0.0, share_weights=False, final_
         net=slim.conv2d(input,actual_conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv1',weights_regularizer=regularizer)
     else:
         net=slim.conv2d(input,actual_conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,scope='g_conv1',weights_regularizer=regularizer)
-    
+
     dilation_schedule = [2, 4, 8, 16, 32, 64]
     for ind in range(len(dilation_schedule)):
         dilation_rate = dilation_schedule[ind]
@@ -307,7 +328,7 @@ def prepare_data(task):
         for i in range(1,2501):
             val_names.append("../data/%s/%06d.png"%(dirname,i))#test input image at 1080p
     return input_names,output_names,val_names,finetune_input_names,finetune_output_names
-    
+
 def prepare_data_zigzag(task):
     input_names=[]
     output_names=[]
@@ -343,7 +364,7 @@ def prepare_data_root(dataroot):
     test_input_dir = os.path.join(dataroot, 'test_label')
     train_output_dir = os.path.join(dataroot, 'train_img')
     test_output_dir = os.path.join(dataroot, 'test_img')
-    
+
     for file in sorted(os.listdir(train_input_dir)):
         input_names.append(os.path.join(train_input_dir, file))
     for file in sorted(os.listdir(train_output_dir)):
@@ -353,7 +374,7 @@ def prepare_data_root(dataroot):
     for file in sorted(os.listdir(test_output_dir)):
         val_img_names.append(os.path.join(test_output_dir, file))
     return input_names, output_names, val_names, val_img_names
-    
+
 os.system('nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp')
 os.environ['CUDA_VISIBLE_DEVICES']=str(np.argmax([int(x.split()[2]) for x in open('tmp','r').readlines()]))
 os.system('rm tmp')
@@ -365,7 +386,7 @@ def save_obj(obj, name ):
 def load_obj(name ):
     with open(name, 'rb') as f:
         return pickle.load(f)
-    
+
 def main():
     parser = argparse_util.ArgumentParser(description='FastImageProcessing')
     parser.add_argument('--name', dest='name', default='', help='name of task')
@@ -425,7 +446,10 @@ def main():
     parser.add_argument('--bilinear_upsampling', dest='bilinear_upsampling', action='store_true', help='if true, use bilateral upsampling')
     parser.add_argument('--full_resolution', dest='full_resolution', action='store_true', help='if true, mean estimator sampled at full resolution with sample rate / sample_scale**2')
     parser.add_argument('--shader_name', dest='shader_name', default='zigzag', help='shader name used to generate shader input in GPU')
-    
+    parser.add_argument('--unet', dest='unet', action='store_true', help='if specified, use unet instead of dilated conv network')
+    parser.add_argument('--unet_base_channel', dest='unet_base_channel', type=int, default=32, help='base channel (1st conv layer channel) for unet')
+    parser.add_argument('--batch_norm_only', dest='batch_norm_only', action='store_true', help='if specified, use batch norm only (no adaptive normalization)')
+
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
     parser.set_defaults(use_batch=False)
@@ -458,11 +482,13 @@ def main():
     parser.set_defaults(accurate_timing=False)
     parser.set_defaults(bilinear_upsampling=False)
     parser.set_defaults(full_resolution=False)
-    
+    parser.set_defaults(unet=False)
+    parser.set_defaults(batch_norm_only=False)
+
     args = parser.parse_args()
-    
+
     main_network(args)
-    
+
 def copy_option(args):
     new_args = copy.copy(args)
     delattr(new_args, 'is_train')
@@ -483,20 +509,20 @@ def copy_option(args):
     delattr(new_args, 'bilinear_upsampling')
     delattr(new_args, 'full_resolution')
     return new_args
-    
+
 def main_network(args):
-    
+
     if args.is_bin:
         assert not args.preload
-    
+
     # batch_size can work with 2, but OOM with 4
-    
+
     if args.name == '':
         args.name = ''.join(random.choice(string.digits) for _ in range(5))
-    
+
     if not os.path.isdir(args.name):
         os.makedirs(args.name)
-        
+
     option_file = os.path.join(args.name, 'option.txt')
     option_copy = copy_option(args)
     if os.path.exists(option_file):
@@ -505,21 +531,24 @@ def main_network(args):
         assert option_str == str(option_copy)
     else:
         open(option_file, 'w').write(str(option_copy))
-    
+
     assert np.log2(args.upsample_scale) == int(np.log2(args.upsample_scale))
     deconv_layers = int(np.log2(args.upsample_scale))
-    
+
     if not args.feature_reduction_channel_by_samples:
         assert args.input_nc % args.nsamples == 0
         nfeatures = args.input_nc // args.nsamples
     else:
         nfeatures = args.input_nc
-    
+
     assert not (args.share_weights and args.feature_reduction_channel_by_samples)
-    
+
     global batch_norm_is_training
     batch_norm_is_training = args.is_train
-    
+
+    global batch_norm_only
+    batch_norm_only = args.batch_norm_only
+
     global actual_conv_channel
     actual_conv_channel *= args.conv_channel_multiplier
     if actual_conv_channel == 0:
@@ -528,7 +557,7 @@ def main_network(args):
         args.initial_layer_channels = actual_conv_channel
     if args.final_layer_channels < 0:
         args.final_layer_channels = actual_conv_channel
-        
+
     global dilation_threshold
     dilation_threshold = args.dilation_threshold
     assert (not args.dilation_clamp_large) or (not args.dilation_remove_large) or (not args.dilation_remove_layer)
@@ -538,26 +567,26 @@ def main_network(args):
     dilation_remove_large = args.dilation_remove_large
     global dilation_remove_layer
     dilation_remove_layer = args.dilation_remove_layer
-        
+
     if not args.add_final_layers:
         args.final_layer_channels = -1
-        
+
     global width
     width = args.input_w
     global height
     height = args.input_h
-    
+
     input_names, output_names, val_names, val_img_names = prepare_data_root(args.dataroot)
     if args.test_training:
         val_names = input_names
         val_img_names = output_names
-        
-    if not args.debug_mode:        
+
+    if not args.debug_mode:
         #is_train = tf.placeholder(tf.bool)
-            
+
         if not args.use_queue:
             input=tf.placeholder(tf.float32,shape=[None,None,None,args.input_nc])
-            output=tf.placeholder(tf.float32,shape=[None,None,None,3]) 
+            output=tf.placeholder(tf.float32,shape=[None,None,None,3])
         else:
             if not args.use_batch:
                 if args.is_train:
@@ -568,15 +597,15 @@ def main_network(args):
                     input_tensor = tf.convert_to_tensor(val_names)
                     output_tensor = tf.convert_to_tensor(val_img_names)
                     is_shuffle = False
-                    
+
                 input_queue, output_queue = tf.train.slice_input_producer([input_tensor, output_tensor], shuffle=is_shuffle, capacity=200)
-                
+
                 input = tf.decode_raw(tf.read_file(input_queue), tf.float32)
-                
+
                 input = tf.reshape(input, (args.input_h, args.input_w, args.input_nc))
                 output = tf.to_float(tf.image.decode_image(tf.read_file(output_queue), channels=3)) / 255.0
                 output.set_shape((640, 960, 3))
-                
+
                 print("start batch")
                 if args.is_train:
                     input, output = tf.train.batch([input, output], 1, num_threads=5, capacity=10)
@@ -587,7 +616,7 @@ def main_network(args):
 
                 #input = tf.expand_dims(input, 0)
                 #output = tf.expand_dims(output, 0)
-                
+
                 if args.share_weights:
                     input = tf.reshape(input, (args.input_h, args.input_w, args.nsamples, nfeatures))
                     input = tf.transpose(input, perm=[2, 0, 1, 3])
@@ -599,7 +628,7 @@ def main_network(args):
                 raise
         input_to_network = input
     else:
-        output=tf.placeholder(tf.float32,shape=[None,None,None,3]) 
+        output=tf.placeholder(tf.float32,shape=[None,None,None,3])
         camera_pos = tf.placeholder(dtype, shape=6)
         shader_time = tf.placeholder(dtype, shape=1)
         if args.full_resolution:
@@ -620,7 +649,7 @@ def main_network(args):
                 shader_samples /= (args.upsample_scale ** 2)
             print("sample count", shader_samples)
             input_to_network = get_tensors(args.dataroot, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name)
-    
+
     with tf.control_dependencies([input_to_network]):
         if args.debug_mode and args.mean_estimator:
             with tf.variable_scope("shader"):
@@ -628,7 +657,7 @@ def main_network(args):
                 if not args.full_resolution:
                     network = tf.image.resize_images(network, tf.stack([tf.shape(input_to_network)[1] * args.upsample_scale, tf.shape(input_to_network)[2] * args.upsample_scale]), method=tf.image.ResizeMethod.NEAREST_NEIGHBOR if not args.bilinear_upsampling else tf.image.ResizeMethod.BILINEAR)
             regularizer_loss = 0
-        else:
+        elif not args.unet:
             if args.input_nc <= actual_conv_channel:
                 ini_id = True
             else:
@@ -648,17 +677,17 @@ def main_network(args):
                     else:
                         input_stacks.append(input[:, :, :, i] * alpha)
                 input_to_network = tf.stack(input_stacks, axis=3)
-                
+
             if args.clip_weights_percentage_after_normalize > 0.0:
                 assert args.encourage_sparse_features
                 assert not args.is_train
-            
+
                 replace_normalize_weights = tf.placeholder(tf.bool)
                 normalize_weights = tf.placeholder(tf.float32,shape=[1, 1, args.input_nc, actual_conv_channel])
             else:
                 replace_normalize_weights = None
                 normalize_weights = None
-            
+
             regularizer_loss = 0
             manual_regularize = args.rowwise_L2_normalize or args.Frobenius_normalize
             if args.encourage_sparse_features:
@@ -686,7 +715,7 @@ def main_network(args):
                             weights_to_input = tf.cond(replace_normalize_weights, lambda: normalize_weights, lambda: weights_to_input)
                     else:
                         weights_to_input = weights
-                        
+
                     input_to_network = tf.nn.conv2d(input_to_network, weights_to_input, [1, 1, 1, 1], "SAME")
                     if manual_regularize:
                         regularizer_loss = args.regularizer_scale * tf.reduce_mean(tf.abs(weights_to_input))
@@ -697,7 +726,7 @@ def main_network(args):
                 if args.add_initial_layers:
                     for nlayer in range(3):
                         input_to_network = slim.conv2d(input_to_network, actual_initial_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(), scope='initial_'+str(nlayer), weights_regularizer=regularizer)
-                
+
             if deconv_layers > 0:
                 if args.deconv:
                     regularizer = None
@@ -721,13 +750,21 @@ def main_network(args):
                         input_to_network = tf.stack(upsample_stacks, axis=3)
                 else:
                     input_to_network = tf.image.resize_images(input_to_network, tf.stack([tf.shape(input_to_network)[1] * args.upsample_scale, tf.shape(input_to_network)[2] * args.upsample_scale]), method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-                    
+
             network=build(input_to_network, ini_id, regularizer_scale=args.regularizer_scale, share_weights=args.share_weights, final_layer_channels=args.final_layer_channels)
-                            
+
             if args.share_weights:
                 assert not args.use_batch
                 #loss = tf.reduce_mean(tf.square(tf.reduce_mean(network, 0) - tf.squeeze(output)))
-    
+        else:
+            with tf.variable_scope("unet"):
+                input_to_network = tf.image.resize_images(input_to_network, tf.stack([tf.shape(input_to_network)[1] * args.upsample_scale, tf.shape(input_to_network)[2] * args.upsample_scale]), method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+                network = unet(input_to_network, args.unet_base_channel, args.update_bn)
+                regularizer_loss = 0
+                manual_regularize = 0
+                alpha = tf.placeholder(tf.float32)
+                alpha_val = 1.0
+
     loss=tf.reduce_mean(tf.square(network-output))
     avg_loss = 0
     tf.summary.scalar('avg_loss', avg_loss)
@@ -741,7 +778,7 @@ def main_network(args):
     tf.summary.scalar('avg_test_all', avg_test_all)
     reg_loss = 0
     tf.summary.scalar('reg_loss', reg_loss)
-    
+
     loss_to_opt = loss + regularizer_loss
 
     if not (args.debug_mode and args.mean_estimator):
@@ -750,9 +787,9 @@ def main_network(args):
                 opt=tf.train.AdamOptimizer(learning_rate=0.0001).minimize(loss_to_opt,var_list=[var for var in tf.trainable_variables()])
         else:
             opt=tf.train.AdamOptimizer(learning_rate=0.0001).minimize(loss_to_opt,var_list=[var for var in tf.trainable_variables()])
-            
+
         saver=tf.train.Saver(max_to_keep=1000)
-    
+
     print("start sess")
     #sess = tf.Session(config=tf.ConfigProto(inter_op_parallelism_threads=10, intra_op_parallelism_threads=3))
     sess = tf.Session()
@@ -763,7 +800,7 @@ def main_network(args):
     sess.run(tf.local_variables_initializer())
     print("initialize global vars")
     sess.run(tf.global_variables_initializer())
-    
+
     if args.use_queue and not args.debug_mode:
         print("start coord")
         coord = tf.train.Coordinator()
@@ -779,7 +816,7 @@ def main_network(args):
         if not ckpt:
             ckpt=tf.train.get_checkpoint_state(args.name)
             read_from_epoch = False
-            
+
         if ckpt:
             print('loaded '+ckpt.model_checkpoint_path)
             saver.restore(sess,ckpt.model_checkpoint_path)
@@ -813,7 +850,7 @@ def main_network(args):
     save_frequency = 1
     num_epoch = args.epoch
     #assert num_epoch % save_frequency == 0
-    
+
     def read_ind(img_arr, name_arr, id, is_npy):
         img_arr[id] = read_name(name_arr[id], is_npy)
         if img_arr[id] is None:
@@ -822,7 +859,7 @@ def main_network(args):
             img_arr[id] = None
             return False
         return True
-            
+
     def read_name(name, is_npy, is_bin=False):
         if not os.path.exists(name):
             return None
@@ -843,7 +880,7 @@ def main_network(args):
             #return np.load(name)
         else:
             return np.fromfile(name, dtype=np.float32).reshape([640, 960, args.input_nc])
-    
+
     if args.preload and not args.use_queue:
         eval_images = [None] * len(val_names)
         eval_out_images = [None] * len(val_names)
@@ -852,12 +889,12 @@ def main_network(args):
             eval_images[id] = np.expand_dims(eval_images[id], axis=0)
             read_ind(eval_out_images, val_img_names, id, False)
             eval_out_images[id] = np.expand_dims(eval_out_images[id], axis=0)
-        
+
     print("arriving before train branch")
-    
+
     if args.is_train:
         all=np.zeros(len(input_names), dtype=float)
-        
+
         if args.preload and not args.use_queue:
             input_images=[None]*len(input_names)
             output_images=[None]*len(input_names)
@@ -868,20 +905,20 @@ def main_network(args):
                 if not args.use_batch:
                     input_images[id] = np.expand_dims(input_images[id], axis=0)
                     output_images[id] = np.expand_dims(output_images[id], axis=0)
-                
+
             if args.use_batch:
                 input_images = np.array(input_images)
                 output_images = np.array(output_images)
                 assert input_images.dtype in allowed_dtypes
                 assert output_images.dtype in allowed_dtypes
-        
+
         alpha_start = -3
         alpha_end = 0
         #num_transition_epoch = 50
         num_transition_epoch = 20
         alpha_schedule = np.logspace(alpha_start, alpha_end, num_transition_epoch)
         printval = False
-                
+
         for epoch in range(1, num_epoch+1):
 
             if read_from_epoch:
@@ -891,28 +928,28 @@ def main_network(args):
                 next_save_point = int(np.ceil(float(epoch) / save_frequency)) * save_frequency
                 if os.path.isdir("%s/%04d"%(args.name,next_save_point)):
                     continue
-            
+
             cnt=0
-            
+
             permutation = np.random.permutation(len(input_names))
             nupdates = len(input_names) if not args.use_batch else int(np.ceil(float(len(input_names)) / args.batch_size))
-            
+
             if args.finetune and epoch <= num_transition_epoch:
                 alpha_val = alpha_schedule[epoch-1]
-            
+
             #for id in np.random.permutation(len(input_names)):
             for i in range(nupdates):
                 st=time.time()
                 start_id = i * args.batch_size
                 end_id = min(len(input_names), (i+1)*args.batch_size)
-                
+
                 if i == nupdates - 1:
                     run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                     run_metadata = tf.RunMetadata()
                 else:
                     run_options = None
                     run_metadata = None
-                
+
                 if not args.use_queue:
                     if args.preload:
                         if not args.use_batch:
@@ -945,15 +982,15 @@ def main_network(args):
                 all[permutation[start_id:end_id]]=current*255.0*255.0
                 cnt += args.batch_size if args.use_batch else 1
                 print("%d %d %.2f %.2f %.2f %s"%(epoch,cnt,current*255.0*255.0,np.mean(all[np.where(all)]),time.time()-st,os.getcwd().split('/')[-2]))
-            
+
             avg_loss = np.mean(all[np.where(all)])
-            
+
             summary = tf.Summary()
             summary.value.add(tag='avg_loss', simple_value=avg_loss)
             if manual_regularize:
                 summary.value.add(tag='reg_loss', simple_value=sess.run(regularizer_loss) / args.regularizer_scale)
-            
-            
+
+
             if args.collect_validate_while_training:
                 all_test=np.zeros(len(val_names), dtype=float)
                 for ind in range(len(val_names)):
@@ -974,7 +1011,7 @@ def main_network(args):
                         current=sess.run(loss,feed_dict={alpha: alpha_val})
                         print("%.3f"%(time.time()-st))
                     all_test[ind] = current * 255.0 * 255.0
-                
+
                 avg_test_close = np.mean(all_test[:5])
                 avg_test_far = np.mean(all_test[5:10])
                 avg_test_middle = np.mean(all_test[10:])
@@ -984,29 +1021,29 @@ def main_network(args):
                 summary.value.add(tag='avg_test_far', simple_value=avg_test_far)
                 summary.value.add(tag='avg_test_middle', simple_value=avg_test_middle)
                 summary.value.add(tag='avg_test_all', simple_value=avg_test_all)
-                
+
             #train_writer.add_run_metadata(run_metadata, 'epoch%d' % epoch)
             train_writer.add_summary(summary, epoch)
-                
+
             if epoch % save_frequency == 0:
                 os.makedirs("%s/%04d"%(args.name,epoch))
                 target=open("%s/%04d/score.txt"%(args.name,epoch),'w')
                 target.write("%f"%np.mean(all[np.where(all)]))
                 target.close()
-                
+
                 #target = open("%s/%04d/score_breakdown.txt"%(args.name,epoch),'w')
                 #target.write("%f, %f, %f, %f"%(avg_test_close, avg_test_far, avg_test_middle, avg_test_all))
                 #target.close()
-                
+
                 saver.save(sess,"%s/model.ckpt"%args.name)
                 saver.save(sess,"%s/%04d/model.ckpt"%(args.name,epoch))
-                
+
         var_list_gconv1 = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='g_conv1')
         g_conv1_dict = {}
         for var_gconv1 in var_list_gconv1:
             g_conv1_dict[var_gconv1.name] = sess.run(var_gconv1)
         save_obj(g_conv1_dict, "%s/g_conv1.pkl"%(args.name))
-    
+
     if not args.is_train:
         if args.debug_mode:
             if args.test_training:
@@ -1020,21 +1057,21 @@ def main_network(args):
                                     ), axis=0)
                 time_vals = np.load(os.path.join(args.dataroot, 'test_time.npy'))
             if args.mean_estimator:
-                #debug_dir = "%s/mean%d"%(args.name, args.estimator_samples)
-                debug_dir = "%s/mean%d"%('/localtmp/yuting', args.estimator_samples)
+                debug_dir = "%s/mean%d"%(args.name, args.estimator_samples)
+                #debug_dir = "%s/mean%d"%('/localtmp/yuting', args.estimator_samples)
             else:
-                #debug_dir = "%s/debug"%args.name
-                debug_dir = "%s/debug"%'/localtmp/yuting'
-                
+                debug_dir = "%s/debug"%args.name
+                #debug_dir = "%s/debug"%'/localtmp/yuting'
+
             debug_dir += '_bilinear' if args.bilinear_upsampling else ''
-            
+
             debug_dir += '_full' if args.full_resolution else ''
-                
+
             debug_dir += '_test' if not args.test_training else '_train'
-                
+
             if not os.path.isdir(debug_dir):
                 os.makedirs(debug_dir)
-            
+
             if args.generate_timeline:
                 run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                 run_metadata = tf.RunMetadata()
@@ -1093,14 +1130,14 @@ def main_network(args):
                         pass
                     if not success:
                         continue
-                    
-                    
+
+
                     ckpt = tf.train.get_checkpoint_state(os.path.join(args.name, dir))
                     if ckpt is None:
                         continue
                     print('loaded '+ckpt.model_checkpoint_path)
                     saver.restore(sess,ckpt.model_checkpoint_path)
-                    
+
                     avg_loss = float(open(os.path.join(args.name, dir, 'score.txt')).read())
                     all_test = np.zeros(len(val_names), dtype=float)
                     for ind in range(len(val_names)):
@@ -1121,12 +1158,12 @@ def main_network(args):
                             current=sess.run(loss,feed_dict={alpha: alpha_val})
                             print("%.3f"%(time.time()-st))
                         all_test[ind] = current * 255.0 * 255.0
-                    
+
                     avg_test_close = np.mean(all_test[:5])
                     avg_test_far = np.mean(all_test[5:10])
                     avg_test_middle = np.mean(all_test[10:])
                     avg_test_all = np.mean(all_test)
-                    
+
                     summary = tf.Summary()
                     summary.value.add(tag='avg_loss', simple_value=avg_loss)
                     summary.value.add(tag='avg_test_close', simple_value=avg_test_close)
@@ -1134,7 +1171,7 @@ def main_network(args):
                     summary.value.add(tag='avg_test_middle', simple_value=avg_test_middle)
                     summary.value.add(tag='avg_test_all', simple_value=avg_test_all)
                     train_writer.add_summary(summary, epoch)
-        
+
             test_dirbase = 'train' if args.test_training else 'test'
             if args.clip_weights > 0:
                 test_dirname = "%s/%s_abs%s"%(args.name, test_dirbase, str(args.clip_weights).replace('.', ''))
@@ -1144,13 +1181,13 @@ def main_network(args):
                 test_dirname = "%s/%s_pct_norm%s"%(args.name, test_dirbase, str(args.clip_weights_percentage_after_normalize).replace('.', ''))
             else:
                 test_dirname = "%s/%s"%(args.name, test_dirbase)
-                
+
             if read_from_epoch and not args.is_train:
                 test_dirname += "_epoch_%04d"%args.which_epoch
-            
+
             if not os.path.isdir(test_dirname):
                 os.makedirs(test_dirname)
-            
+
             if args.clip_weights > 0:
                 var_all = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
                 count_zero = 0
@@ -1173,7 +1210,7 @@ def main_network(args):
                 target.write("""
         threshold: {args.clip_weights}
         clipped_weights: {count_zero} / {count_all}
-        percentage: {clip_percent}%""".format(**locals()))  
+        percentage: {clip_percent}%""".format(**locals()))
                 target.close()
             elif args.clip_weights_percentage > 0:
                 all_weights = np.empty(0)
@@ -1187,7 +1224,7 @@ def main_network(args):
                     if success:
                         weights_val = sess.run(var)
                         all_weights = np.concatenate((all_weights, np.absolute(weights_val.reshape(weights_val.size))))
-                        
+
                 percentile = np.percentile(abs(all_weights), args.clip_weights_percentage)
                 for var in var_all:
                     if args.encourage_sparse_features:
@@ -1199,7 +1236,7 @@ def main_network(args):
                         weights_val = sess.run(var)
                         weights_val[abs(weights_val) < percentile] = 0
                         sess.run(tf.assign(var, weights_val))
-                total_num_weights = all_weights.shape[0]    
+                total_num_weights = all_weights.shape[0]
                 target = open(os.path.join(test_dirname, 'clip_info.txt'), 'w')
                 target.write("""
         percentage: {args.clip_weights_percentage}%
@@ -1218,7 +1255,7 @@ def main_network(args):
         percentage: {args.clip_weights_percentage_after_normalize}%
         percentile value after normalize: {percentile}""".format(**locals()))
                     target.close()
-            
+
             all_test=np.zeros(len(val_names), dtype=float)
             for ind in range(len(val_names)):
                 if args.generate_timeline:
@@ -1259,30 +1296,30 @@ def main_network(args):
                     chrome_trace = fetched_timeline.generate_chrome_trace_format()
                     with open("%s/nn_%d.json"%(test_dirname, ind+1), 'w') as f:
                         f.write(chrome_trace)
-        
+
         target=open(os.path.join(test_dirname, 'score.txt'),'w')
-        target.write("%f"%np.mean(all_test[np.where(all_test)]))  
+        target.write("%f"%np.mean(all_test[np.where(all_test)]))
         target.close()
         if len(val_names) == 30:
             score_close = np.mean(all_test[:5])
             score_far = np.mean(all_test[5:10])
             score_middle = np.mean(all_test[10:])
             target=open(os.path.join(test_dirname, 'score_breakdown.txt'),'w')
-            target.write("%f, %f, %f"%(score_close, score_far, score_middle))  
+            target.write("%f, %f, %f"%(score_close, score_far, score_middle))
             target.close()
 
         if args.test_training:
             grounddir = os.path.join(args.dataroot, 'train_img')
         else:
-            grounddir = os.path.join(args.dataroot, 'test_img')        
-    
+            grounddir = os.path.join(args.dataroot, 'test_img')
+
     if args.use_queue and not args.debug_mode:
         coord.request_stop()
         coord.join(threads)
     sess.close()
-    
+
     if not args.is_train:
-        os.system('source activate pytorch36 && CUDA_VISIBLE_DEVICES=2, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir) 
-            
+        os.system('source activate pytorch36 && CUDA_VISIBLE_DEVICES=2, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir)
+
 if __name__ == '__main__':
     main()
