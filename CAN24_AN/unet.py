@@ -32,9 +32,6 @@ pool_size = [1, 2, 2, 1]
 
 alpha = 0.1
 
-def nm(x):
-    return slim.batch_norm(x, is_training=True)
-
 # current experiment: same capacity
 # ours: with batch norm, 48, 48, 48
 # encoder-decoder: no batch norm, 10 initially
@@ -75,7 +72,10 @@ def prectifier_initializer(channel):
         return tf.random_normal(shape, stddev=std, dtype=dtype)
     return _initializer
 
-def unet(input, unet_base_channel=base_channel, batch_norm=False):
+def unet(input, unet_base_channel=base_channel, batch_norm=False, batch_norm_is_training=True):
+
+    def nm(x):
+        return slim.batch_norm(x, is_training=batch_norm_is_training)
     net = input
     skip_features = []
     ini_channels, downsample_channels, upsample_channels, final_channels = get_conv_channels(unet_base_channel)
@@ -111,7 +111,7 @@ def unet(input, unet_base_channel=base_channel, batch_norm=False):
             else:
                 conv_channels = [channel, final_channels[1]]
             for k in range(2):
-                net = slim.conv2d(net, conv_channels[k], conv_size, activation_fn=lrelu, normalizer_fn=normalizer_fn, weights_initializer=prectifier_initializer(channel))
+                net = slim.conv2d(net, conv_channels[k], conv_size, activation_fn=lrelu, normalizer_fn=normalizer_fn, weights_initializer=prectifier_initializer(conv_channels[k]))
 
-    net = slim.conv2d(net, output_channels, conv_size, activation_fn=None, weights_initializer=prectifier_initializer(channel), scope='output')
+    net = slim.conv2d(net, output_channels, conv_size, activation_fn=None, weights_initializer=prectifier_initializer(output_channels), scope='output')
     return net

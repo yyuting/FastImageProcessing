@@ -11,8 +11,11 @@ from tensorflow.python.client import timeline
 import copy
 from shaders import *
 import sys; sys.path += ['../../global_opt/proj/apps']
-import compiler_problem
+#import compiler_problem
 from unet import unet
+import importlib
+import importlib.util
+import subprocess
 
 allowed_dtypes = ['float64', 'float32', 'uint8']
 no_L1_reg_other_layers = True
@@ -24,20 +27,45 @@ dtype=tf.float64
 
 batch_norm_is_training = True
 
-def get_tensors(dataroot, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag'):
+def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag'):
     # 2x_1sample on margo
     #camera_pos = np.load('/localtmp/yuting/out_2x1_manual_carft/train.npy')[0, :]
 
     #feature_scale = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/datas_rescaled_25_75_2_153/feature_scale.npy')
     #feature_bias = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/datas_rescaled_25_75_2_153/feature_bias.npy')
 
-    feature_scale = np.load(os.path.join(dataroot, 'feature_scale.npy'))
-    feature_bias = np.load(os.path.join(dataroot, 'feature_bias.npy'))
+    if output_type not in ['rgb', 'bgr']:
+        feature_scale = np.load(os.path.join(dataroot, 'feature_scale.npy'))
+        feature_bias = np.load(os.path.join(dataroot, 'feature_bias.npy'))
 
-    Q1 = np.load(os.path.join(dataroot, 'Q1.npy'))
-    Q3 = np.load(os.path.join(dataroot, 'Q3.npy'))
-    IQR = np.load(os.path.join(dataroot, 'IQR.npy'))
-    tolerance = 2.0
+        Q1 = np.load(os.path.join(dataroot, 'Q1.npy'))
+        Q3 = np.load(os.path.join(dataroot, 'Q3.npy'))
+        IQR = np.load(os.path.join(dataroot, 'IQR.npy'))
+        tolerance = 2.0
+
+    compiler_problem_full_name = os.path.abspath(os.path.join(name, 'compiler_problem.py'))
+    if not os.path.exists(compiler_problem_full_name):
+        if shader_name == 'zigzag':
+            shader_args = 'render_zigzag plane spheres'
+        elif shader_name == 'sin_quadratic':
+            shader_args = 'render_sin_quadratic plane ripples'
+        elif shader_name == 'bricks':
+            shader_args = 'render_bricks plane none'
+        render_util_dir = os.path.abspath('../../global_opt/proj/apps')
+        render_single_full_name = os.path.abspath(os.path.join(render_util_dir, 'render_single.py'))
+        cwd = os.getcwd()
+        os.chdir(render_util_dir)
+        ans = os.system('cd ' + render_util_dir + ' && source activate py36 && python ' + render_single_full_name + ' out ' + shader_args + ' --is-tf --code-only --log-intermediates && source activate tensorflow35 && cd ' + cwd)
+        #ans = subprocess.call('cd ' + render_util_dir + ' && source activate py36 && python ' + render_single_full_name + ' out ' + shader_args + ' --is-tf --code-only --log-intermediates && source activate tensorflow35 && cd ' + cwd)
+
+        print(ans)
+        os.chdir(cwd)
+        compiler_problem_old = os.path.abspath('../../global_opt/proj/apps/compiler_problem.py')
+        os.rename(compiler_problem_old, compiler_problem_full_name)
+
+    spec = importlib.util.spec_from_file_location("module.name", compiler_problem_full_name)
+    compiler_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(compiler_module)
 
     #Q1 = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/Q1.npy')
     #Q3 = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/Q3.npy')
@@ -62,9 +90,9 @@ def get_tensors(dataroot, camera_pos, shader_time, output_type='remove_constant'
     elif shader_name == 'bricks':
         color_inds = [0, 105, 120]
 
-    features = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, color_inds=color_inds)
+    features, vec_output = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, return_vec_output=True, compiler_module=compiler_module)
 
-    color_features = [features[i] for i in range(len(features)) if i in color_inds]
+    color_features = vec_output
     with tf.control_dependencies(color_features):
         with tf.variable_scope("auxiliary"):
             valid_inds = []
@@ -101,12 +129,14 @@ def get_tensors(dataroot, camera_pos, shader_time, output_type='remove_constant'
                 features = tf.cast(tf.stack([features[k] for k in valid_inds], axis=3), tf.float32)
             elif output_type == 'all':
                 features = tf.cast(tf.stack(features, axis=3), tf.float32)
-            elif output_type == 'rgb':
-                features = tf.cast(tf.stack([features[k] for k in color_inds], axis=3), tf.float32)
+            elif output_type in ['rgb', 'bgr']:
+                features = tf.cast(tf.stack(vec_output, axis=3), tf.float32)
+                if output_type == 'bgr':
+                    features = features[..., ::-1]
             else:
                 raise
 
-            if output_type != 'rgb':
+            if output_type not in ['rgb', 'bgr']:
                 features += feature_bias
                 features *= feature_scale
                 features = tf.clip_by_value(features, 0.0, 1.0)
@@ -115,17 +145,23 @@ def get_tensors(dataroot, camera_pos, shader_time, output_type='remove_constant'
     #numpy.save('valid_inds.npy', valid_inds)
     #return features
 
-def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None):
+def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None):
     vec_output_len = 3
-    if shader_name == 'zigzag':
-        features_len = 266
-    elif shader_name == 'sin_quadratic':
-        features_len = 267
-    elif shader_name == 'bricks':
-        features_len = 142
-    elif shader_name == 'compiler_problem':
-        features_len = compiler_problem.f_log_intermediate_len + 7
-        vec_output_len = compiler_problem.vec_output_len
+    assert compiler_module is not None
+    #if shader_name == 'zigzag':
+    #    features_len = 266
+    #elif shader_name == 'sin_quadratic':
+    #    features_len = 267
+    #elif shader_name == 'bricks':
+    #    features_len = 142
+    #elif shader_name == 'compiler_problem':
+    #    compiler_problem_full_name = os.path.abspath('../../global_opt/proj/apps/compiler_problem')
+    #    compiler_module = importlib.import_module(compiler_problem_full_name)
+
+    features_len = compiler_module.f_log_intermediate_len + 7
+    vec_output_len = compiler_module.vec_output_len
+
+
     f_log_intermediate = [None] * features_len
     vec_output = [None] * vec_output_len
 
@@ -158,7 +194,7 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     if render_sigma is None:
         render_sigma = [0.5, 0.5, 0.0]
     vector3 = [tensor_x0 + render_sigma[0] * sample1, tensor_x1 + render_sigma[1] * sample2, tensor_x2]
-    get_shader(vector3, f_log_intermediate, camera_pos, features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output)
+    get_shader(vector3, f_log_intermediate, camera_pos, features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output, compiler_module=compiler_module)
 
     f_log_intermediate[features_len-2] = sample1
     f_log_intermediate[features_len-1] = sample2
@@ -168,27 +204,30 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     else:
         return f_log_intermediate
 
-def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zigzag', color_inds=None, vec_output=None):
+def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zigzag', color_inds=None, vec_output=None, compiler_module=None):
+    assert compiler_module is not None
     features = get_features(x, camera_pos)
     if vec_output is None:
         vec_output = [None] * 3
-    if shader_name == 'zigzag':
-        zigzag_f(features, f_log_intermediate)
-    elif shader_name == 'sin_quadratic':
-        sin_quadratic_f(features, f_log_intermediate)
-    elif shader_name == 'bricks':
-        bricks_f(features, f_log_intermediate)
-    elif shader_name == 'compiler_problem':
-        compiler_problem.f(features, f_log_intermediate, vec_output)
-    else:
-        raise
+    #if shader_name == 'zigzag':
+    #    zigzag_f(features, f_log_intermediate)
+    #elif shader_name == 'sin_quadratic':
+    #    sin_quadratic_f(features, f_log_intermediate)
+    #elif shader_name == 'bricks':
+    #    bricks_f(features, f_log_intermediate)
+    #elif shader_name == 'compiler_problem':
+    #    compiler_module.f(features, f_log_intermediate, vec_output)
+    #else:
+    #    raise
 
-    if color_inds is None:
-        color_features = None
-    else:
-        color_features = [f_log_intermediate[i] for i in range(len(f_log_intermediate)) if i in color_inds]
+    compiler_module.f(features, f_log_intermediate, vec_output)
 
-    with tf.control_dependencies(color_features):
+    #if color_inds is None:
+    #    color_features = None
+    #else:
+    #    color_features = [f_log_intermediate[i] for i in range(len(f_log_intermediate)) if i in color_inds]
+
+    with tf.control_dependencies(vec_output):
         with tf.variable_scope("auxiliary"):
             h = 1e-8
             features_neg = get_features([x[0]-h, x[1], x[2]], camera_pos)
@@ -255,13 +294,15 @@ def identity_initializer():
 
 batch_norm_only = False
 
-def nm(x):
+def adaptive_nm(x):
     if not batch_norm_only:
         w0=tf.Variable(1.0,name='w0')
         w1=tf.Variable(0.0,name='w1')
         return w0*x+w1*slim.batch_norm(x, is_training=batch_norm_is_training) # the parameter "is_training" in slim.batch_norm does not seem to help so I do not use it
     else:
         return slim.batch_norm(x, is_training=batch_norm_is_training)
+
+nm = adaptive_nm
 
 conv_channel = 24
 actual_conv_channel = conv_channel
@@ -449,6 +490,7 @@ def main():
     parser.add_argument('--unet', dest='unet', action='store_true', help='if specified, use unet instead of dilated conv network')
     parser.add_argument('--unet_base_channel', dest='unet_base_channel', type=int, default=32, help='base channel (1st conv layer channel) for unet')
     parser.add_argument('--batch_norm_only', dest='batch_norm_only', action='store_true', help='if specified, use batch norm only (no adaptive normalization)')
+    parser.add_argument('--no_batch_norm', dest='batch_norm', action='store_false', help='if specified, do not apply batch norm')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -484,6 +526,7 @@ def main():
     parser.set_defaults(full_resolution=False)
     parser.set_defaults(unet=False)
     parser.set_defaults(batch_norm_only=False)
+    parser.set_defaults(batch_norm=True)
 
     args = parser.parse_args()
 
@@ -576,6 +619,11 @@ def main_network(args):
     global height
     height = args.input_h
 
+    if not args.batch_norm:
+        global nm
+        nm = None
+        args.update_bn = False
+
     input_names, output_names, val_names, val_img_names = prepare_data_root(args.dataroot)
     if args.test_training:
         val_names = input_names
@@ -639,6 +687,8 @@ def main_network(args):
                 output_type = 'all'
             elif args.mean_estimator:
                 output_type = 'rgb'
+            elif args.input_nc == 3:
+                output_type = 'bgr'
             else:
                 output_type = 'remove_constant'
             if args.mean_estimator:
@@ -648,7 +698,7 @@ def main_network(args):
             if args.full_resolution:
                 shader_samples /= (args.upsample_scale ** 2)
             print("sample count", shader_samples)
-            input_to_network = get_tensors(args.dataroot, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name)
+            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name)
 
     with tf.control_dependencies([input_to_network]):
         if args.debug_mode and args.mean_estimator:
@@ -759,7 +809,7 @@ def main_network(args):
         else:
             with tf.variable_scope("unet"):
                 input_to_network = tf.image.resize_images(input_to_network, tf.stack([tf.shape(input_to_network)[1] * args.upsample_scale, tf.shape(input_to_network)[2] * args.upsample_scale]), method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
-                network = unet(input_to_network, args.unet_base_channel, args.update_bn)
+                network = unet(input_to_network, args.unet_base_channel, args.update_bn, batch_norm_is_training)
                 regularizer_loss = 0
                 manual_regularize = 0
                 alpha = tf.placeholder(tf.float32)
