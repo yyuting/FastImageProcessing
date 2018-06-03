@@ -55,7 +55,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
         render_single_full_name = os.path.abspath(os.path.join(render_util_dir, 'render_single.py'))
         cwd = os.getcwd()
         os.chdir(render_util_dir)
-        ans = os.system('cd ' + render_util_dir + ' && source activate py36 && python ' + render_single_full_name + ' ' + os.path.abspath(name) + shader_args + ' --is-tf --code-only --log-intermediates && source activate tensorflow35 && cd ' + cwd)
+        ans = os.system('cd ' + render_util_dir + ' && source activate py36 && python ' + render_single_full_name + ' ' + os.path.join(cwd, name) + shader_args + ' --is-tf --code-only --log-intermediates && source activate tensorflow35 && cd ' + cwd)
         #ans = subprocess.call('cd ' + render_util_dir + ' && source activate py36 && python ' + render_single_full_name + ' out ' + shader_args + ' --is-tf --code-only --log-intermediates && source activate tensorflow35 && cd ' + cwd)
 
         print(ans)
@@ -140,6 +140,8 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                 features += feature_bias
                 features *= feature_scale
                 features = tf.clip_by_value(features, 0.0, 1.0)
+                
+    features = tf.where(tf.is_nan(features), tf.zeros_like(features), features)
     return features
 
     #numpy.save('valid_inds.npy', valid_inds)
