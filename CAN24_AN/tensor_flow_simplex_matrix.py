@@ -25,7 +25,7 @@ np_perm = np.array(np_perm + np_perm, dtype=np.int32)
 
 np_grad3 = np.array([[1, 1, 0], [-1, 1, 0], [1, -1, 0], [-1, -1, 0],
                      [1, 0, 1], [-1, 0, 1], [1, 0, -1], [-1, 0, -1],
-                     [0, 1, 1], [0, -1, 1], [0, 1, -1], [0, -1, -1]], dtype=np.float64)
+                     [0, 1, 1], [0, -1, 1], [0, 1, -1], [0, -1, -1]], dtype=np.float32)
 
 vertex_options = np.array([
     [1, 0, 0, 1, 1, 0],
@@ -34,7 +34,7 @@ vertex_options = np.array([
     [0, 0, 1, 0, 1, 1],
     [0, 1, 0, 0, 1, 1],
     [0, 1, 0, 1, 1, 0]
-], dtype=np.float64)
+], dtype=np.float32)
 
 # Dimensions are: x0 >= y0, y0 >= z0, x0 >= z0
 np_vertex_table = np.array([
@@ -42,14 +42,14 @@ np_vertex_table = np.array([
      [vertex_options[4], vertex_options[5]]],
     [[vertex_options[2], vertex_options[1]],
      [vertex_options[2], vertex_options[0]]]
-], dtype=np.float64)
+], dtype=np.float32)
 
 
 def calculate_gradient_contribution(offsets, gis, gradient_map, length):
     t = 0.5 - offsets[:, 0] ** 2 - offsets[:, 1] ** 2 - offsets[:, 2] ** 2
     mapped_gis = map_gradients(gradient_map, gis, length)
     dot_products = tf.reduce_sum(mapped_gis * offsets, 1)
-    return tf.cast(tf.greater_equal(t, 0), dtype=tf.float64) * t ** 4 * dot_products
+    return tf.cast(tf.greater_equal(t, 0), dtype=tf.float32) * t ** 4 * dot_products
 
 
 def noise3d(input_vectors, perm, grad3, vertex_table, length):
@@ -126,26 +126,26 @@ def calculate_image(noise_values, phases, shape):
             tf.linspace(0.0, tf.to_float(phases - 1), phases))
     , phases, 2)) + 1.0) * 128)
     return tf.concat([val, val, val], 2)
-    
+
 def simplex_noise_2arg(x, y):
     phases = 10.0
     xx = tf.tile(tf.expand_dims(x, axis=3), [1, 1, 1, int(phases)])
-    xx *= tf.cast(tf.pow(2.0, tf.linspace(0.0, (phases - 1), int(phases))), tf.float64)
+    xx *= tf.cast(tf.pow(2.0, tf.linspace(0.0, (phases - 1), int(phases))), tf.float32)
     yy = tf.tile(tf.expand_dims(y, axis=3), [1, 1, 1, int(phases)])
-    yy *= tf.cast(tf.pow(2.0, tf.linspace(0.0, (phases - 1), int(phases))), tf.float64)
-    
+    yy *= tf.cast(tf.pow(2.0, tf.linspace(0.0, (phases - 1), int(phases))), tf.float32)
+
     scale = 10.0
     xx /= scale
     yy /= scale
-    
+
     zz = 10 * tf.linspace(0.0, (phases - 1), int(phases))
     zz = tf.expand_dims(tf.expand_dims(tf.expand_dims(zz, axis=0), axis=0), axis=0)
-    zz = tf.cast(tf.tile(zz, [tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2], 1]), tf.float64)
-    
+    zz = tf.cast(tf.tile(zz, [tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2], 1]), tf.float32)
+
     length = tf.shape(x)[0] * tf.shape(x)[1] * tf.shape(x)[2] * int(phases)
     input_vectors = tf.reshape(tf.stack([xx, yy, zz], axis=4), [length, 3])
     noise = noise3d(input_vectors, np_perm, np_grad3, np_vertex_table, length)
     reshaped_noise = tf.reshape(noise, [tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2], int(phases)])
-    reshaped_noise /= tf.cast(tf.pow(2.0, tf.linspace(0.0, (phases - 1), int(phases))), tf.float64)
+    reshaped_noise /= tf.cast(tf.pow(2.0, tf.linspace(0.0, (phases - 1), int(phases))), tf.float32)
     noise_sum = tf.reduce_sum(reshaped_noise, 3)
     return 4.0 * noise_sum

@@ -23,7 +23,7 @@ no_L1_reg_other_layers = True
 width = 500
 height = 400
 
-dtype=tf.float64
+dtype = tf.float32
 
 batch_norm_is_training = True
 
@@ -46,22 +46,22 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
     compiler_problem_full_name = os.path.abspath(os.path.join(name, 'compiler_problem.py'))
     if not os.path.exists(compiler_problem_full_name):
         if shader_name == 'zigzag':
-            shader_args = 'render_zigzag plane spheres'
+            shader_args = ' render_zigzag plane spheres '
         elif shader_name == 'sin_quadratic':
-            shader_args = 'render_sin_quadratic plane ripples'
+            shader_args = ' render_sin_quadratic plane ripples '
         elif shader_name == 'bricks':
-            shader_args = 'render_bricks plane none'
+            shader_args = ' render_bricks plane none '
         render_util_dir = os.path.abspath('../../global_opt/proj/apps')
         render_single_full_name = os.path.abspath(os.path.join(render_util_dir, 'render_single.py'))
         cwd = os.getcwd()
         os.chdir(render_util_dir)
-        ans = os.system('cd ' + render_util_dir + ' && source activate py36 && python ' + render_single_full_name + ' out ' + shader_args + ' --is-tf --code-only --log-intermediates && source activate tensorflow35 && cd ' + cwd)
+        ans = os.system('cd ' + render_util_dir + ' && source activate py36 && python ' + render_single_full_name + ' ' + os.path.abspath(name) + shader_args + ' --is-tf --code-only --log-intermediates && source activate tensorflow35 && cd ' + cwd)
         #ans = subprocess.call('cd ' + render_util_dir + ' && source activate py36 && python ' + render_single_full_name + ' out ' + shader_args + ' --is-tf --code-only --log-intermediates && source activate tensorflow35 && cd ' + cwd)
 
         print(ans)
         os.chdir(cwd)
-        compiler_problem_old = os.path.abspath('../../global_opt/proj/apps/compiler_problem.py')
-        os.rename(compiler_problem_old, compiler_problem_full_name)
+        #compiler_problem_old = os.path.abspath('../../global_opt/proj/apps/compiler_problem.py')
+        #os.rename(compiler_problem_old, compiler_problem_full_name)
 
     spec = importlib.util.spec_from_file_location("module.name", compiler_problem_full_name)
     compiler_module = importlib.util.module_from_spec(spec)
@@ -188,12 +188,16 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     else:
         #sample1 = tf.constant(samples[0], dtype=dtype)
         #sample2 = tf.constant(samples[1], dtype=dtype)
-        sample1 = samples[0].astype(np.float64)
-        sample2 = samples[1].astype(np.float64)
+        if dtype == tf.float64:
+            sample1 = samples[0].astype(np.float64)
+            sample2 = samples[1].astype(np.float64)
 
     if render_sigma is None:
         render_sigma = [0.5, 0.5, 0.0]
     vector3 = [tensor_x0 + render_sigma[0] * sample1, tensor_x1 + render_sigma[1] * sample2, tensor_x2]
+    #vector3 = [tensor_x0, tensor_x1, tensor_x2]
+    f_log_intermediate[0] = shader_time
+    f_log_intermediate[1] = camera_pos
     get_shader(vector3, f_log_intermediate, camera_pos, features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output, compiler_module=compiler_module)
 
     f_log_intermediate[features_len-2] = sample1
@@ -229,7 +233,7 @@ def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zig
 
     with tf.control_dependencies(vec_output):
         with tf.variable_scope("auxiliary"):
-            h = 1e-8
+            h = 1e-4
             features_neg = get_features([x[0]-h, x[1], x[2]], camera_pos)
             features_pos = get_features([x[0]+h, x[1], x[2]], camera_pos)
             f_log_intermediate[features_len-7] = (features_pos[1] - features_neg[1]) / (2 * h)
