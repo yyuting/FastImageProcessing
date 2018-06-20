@@ -24,7 +24,10 @@ def tf_fract(x):
 def tf_np_wrapper(func):
     def f(x, y=None):
         if isinstance(x, tf.Tensor) or isinstance(y, tf.Tensor):
-            actual_func = getattr(tf, func)
+            if func == 'fmod':
+                actual_func = tf.floormod
+            else:
+                actual_func = getattr(tf, func)
         else:
             actual_func = getattr(np, func)
         if y is None:

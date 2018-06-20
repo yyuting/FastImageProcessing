@@ -27,7 +27,7 @@ dtype = tf.float32
 
 batch_norm_is_training = True
 
-def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag'):
+def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[]):
     # 2x_1sample on margo
     #camera_pos = np.load('/localtmp/yuting/out_2x1_manual_carft/train.npy')[0, :]
 
@@ -51,6 +51,8 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             shader_args = ' render_sin_quadratic plane ripples '
         elif shader_name == 'bricks':
             shader_args = ' render_bricks plane none '
+        elif shader_name == 'mandelbrot':
+            shader_args = ' render_mandelbrot_tile_radius plane none '
         render_util_dir = os.path.abspath('../../global_opt/proj/apps')
         render_single_full_name = os.path.abspath(os.path.join(render_util_dir, 'render_single.py'))
         cwd = os.getcwd()
@@ -82,13 +84,6 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
     #height = 640
 
     #samples = [all_features[-2, :, :], all_features[-1, :, :]]
-
-    if shader_name == 'zigzag':
-        color_inds = [0, 249, 254]
-    elif shader_name == 'sin_quadratic':
-        color_inds = [0, 242, 251]
-    elif shader_name == 'bricks':
-        color_inds = [0, 105, 120]
 
     features, vec_output = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, return_vec_output=True, compiler_module=compiler_module)
 
@@ -125,6 +120,15 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             #    features[250] = features_dummy_list[1]
             #    features[255] = features_dummy_list[2]
 
+            for vec in vec_output:
+                raw_ind = features.index(vec)
+                actual_ind = valid_inds.index(raw_ind)
+                color_inds.append(actual_ind)
+
+            for ind in color_inds:
+                feature_bias[ind] = 0.0
+                feature_scale[ind] = 1.0
+
             if output_type == 'remove_constant':
                 features = tf.cast(tf.stack([features[k] for k in valid_inds], axis=3), tf.float32)
             elif output_type == 'all':
@@ -136,12 +140,35 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             else:
                 raise
 
-            if output_type not in ['rgb', 'bgr']:
+            if (output_type not in ['rgb', 'bgr']) and not learn_scale:
                 features += feature_bias
                 features *= feature_scale
+            elif learn_scale:
+                old_features = features
+                features = tf.where(tf.is_finite(old_features), features, tf.zeros_like(features))
+                if not scale_ratio:
+                    feature_bias_w = tf.Variable(feature_bias, name='feature_bias')
+                    feature_scale_w = tf.Variable(feature_scale, name='feature_scale')
+                    features += feature_bias_w
+                    features *= feature_scale_w
+                else:
+                    feature_bias_w = tf.Variable(numpy.ones_like(feature_bias), name='feature_bias')
+                    feature_scale_w = tf.Variable(numpy.ones_like(feature_scale), name='feature_scale')
+                    features += feature_bias_w
+                    features *= feature_scale_w
+                features = tf.where(tf.is_finite(old_features), features, tf.zeros_like(features))
+                feature_w.append(feature_bias_w)
+                feature_w.append(feature_scale_w)
+            if soft_scale:
+                if not use_sigmoid:
+                    features = 0.5 * (tf.erf(10.0 * features) + tf.erf(10.0 * (1 - features)))
+                else:
+                    features = tf.sigmoid(30.0 * features) + tf.sigmoid(30.0 * (1 - features)) - 1.0
+            else:
                 features = tf.clip_by_value(features, 0.0, 1.0)
-                
-    features = tf.where(tf.is_nan(features), tf.zeros_like(features), features)
+
+            if not learn_scale:
+                features = tf.where(tf.is_nan(features), tf.zeros_like(features), features)
     return features
 
     #numpy.save('valid_inds.npy', valid_inds)
@@ -273,7 +300,8 @@ def get_features(x, camera_pos):
 
     light_dir = [0.22808577638091165, 0.60822873701576452, 0.76028592126970562]
 
-    t_ray = -ray_origin[2] / ray_dir_p[2]
+    #t_ray = -ray_origin[2] / (ray_dir_p[2] + 1e-8)
+    t_ray = -ray_origin[2] / (ray_dir_p[2])
 
     features = [None] * 8
     features[0] = x[2]
@@ -289,12 +317,19 @@ def get_features(x, camera_pos):
 def lrelu(x):
     return tf.maximum(x*0.2,x)
 
-def identity_initializer():
+def identity_initializer(in_channels=[], allow_map_to_less=False):
     def _initializer(shape, dtype=tf.float32, partition_info=None):
         array = np.zeros(shape, dtype=float)
         cx, cy = shape[0]//2, shape[1]//2
-        for i in range(shape[2]):
-            array[cx, cy, i, i] = 1
+        if len(in_channels) > 0:
+            for k in range(len(in_channels)):
+                array[cx, cy, in_channels[k], k] = 1
+        elif allow_map_to_less:
+            for i in range(min(shape[2], shape[3])):
+                array[cx, cy, i, i] = 1
+        else:
+            for i in range(shape[2]):
+                array[cx, cy, i, i] = 1
         return tf.constant(array, dtype=dtype)
     return _initializer
 
@@ -318,12 +353,12 @@ dilation_clamp_large = False
 dilation_remove_layer = False
 dilation_threshold = 8
 
-def build(input, ini_id=True, regularizer_scale=0.0, share_weights=False, final_layer_channels=-1):
+def build(input, ini_id=True, regularizer_scale=0.0, share_weights=False, final_layer_channels=-1, identity_initialize=False):
     regularizer = None
     if not no_L1_reg_other_layers and regularizer_scale > 0.0:
         regularizer = slim.l1_regularizer(regularizer_scale)
-    if ini_id:
-        net=slim.conv2d(input,actual_conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv1',weights_regularizer=regularizer)
+    if ini_id or identity_initialize:
+        net=slim.conv2d(input,actual_conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(allow_map_to_less=True),scope='g_conv1',weights_regularizer=regularizer)
     else:
         net=slim.conv2d(input,actual_conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,scope='g_conv1',weights_regularizer=regularizer)
 
@@ -344,17 +379,17 @@ def build(input, ini_id=True, regularizer_scale=0.0, share_weights=False, final_
 
     net=slim.conv2d(net,actual_conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv9',weights_regularizer=regularizer)
     if final_layer_channels > 0:
-        if actual_conv_channel > final_layer_channels:
+        if actual_conv_channel > final_layer_channels and (not identity_initialize):
             net = slim.conv2d(net, final_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, scope='final_0', weights_regularizer=regularizer)
             nlayers = [1, 2]
         else:
             nlayers = [0, 1, 2]
         for nlayer in nlayers:
-            net = slim.conv2d(net, final_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(), scope='final_'+str(nlayer),weights_regularizer=regularizer)
+            net = slim.conv2d(net, final_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(allow_map_to_less=True), scope='final_'+str(nlayer),weights_regularizer=regularizer)
 
     if share_weights:
         net = tf.expand_dims(tf.reduce_mean(net, 0), 0)
-    net=slim.conv2d(net,3,[1,1],rate=1,activation_fn=None,scope='g_conv_last',weights_regularizer=regularizer)
+    net=slim.conv2d(net,3,[1,1],rate=1,activation_fn=None,scope='g_conv_last',weights_regularizer=regularizer, weights_initializer=identity_initializer(allow_map_to_less=True) if identity_initialize else tf.contrib.layers.xavier_initializer())
     return net
 
 def prepare_data(task):
@@ -445,7 +480,7 @@ def main():
     parser.add_argument('--batch_size', dest='batch_size', type=int, default=1, help='size of batches')
     parser.add_argument('--finetune', dest='finetune', action='store_true', help='fine tune on a previously tuned network')
     parser.add_argument('--orig_name', dest='orig_name', default='', help='name of original task that is fine tuned on')
-    parser.add_argument('--orig_channel', dest='orig_channel', default='0,1,2', help='list of input channels used in original tuning')
+    parser.add_argument('--orig_channel', dest='orig_channel', default='', help='list of input channels used in original tuning')
     parser.add_argument('--epoch', dest='epoch', type=int, default=200, help='number of epochs to train, seperated by comma')
     parser.add_argument('--nsamples', dest='nsamples', type=int, default=1, help='number of samples in fine tuning input dataset')
     parser.add_argument('--debug_mode', dest='debug_mode', action='store_true', help='debug mode')
@@ -497,6 +532,13 @@ def main():
     parser.add_argument('--unet_base_channel', dest='unet_base_channel', type=int, default=32, help='base channel (1st conv layer channel) for unet')
     parser.add_argument('--batch_norm_only', dest='batch_norm_only', action='store_true', help='if specified, use batch norm only (no adaptive normalization)')
     parser.add_argument('--no_batch_norm', dest='batch_norm', action='store_false', help='if specified, do not apply batch norm')
+    parser.add_argument('--data_from_gpu', dest='data_from_gpu', action='store_true', help='if specified input data is generated from gpu on the fly')
+    parser.add_argument('--learn_scale', dest='learn_scale', action='store_true', help='if specified, learn feature scale and feature biase instead of read it from disk')
+    parser.add_argument('--soft_scale', dest='soft_scale', action='store_true', help='if specified, use soft scale instead of direct clipping')
+    parser.add_argument('--learning_rate', dest='learning_rate', type=float, default=0.0001, help='learning rate for adam optimizer')
+    parser.add_argument('--scale_ratio', dest='scale_ratio', action='store_true', help='if specified, learn the ratio of scale and bias')
+    parser.add_argument('--use_sigmoid', dest='use_sigmoid', action='store_true', help='if specified, use sigmoid as soft scale')
+    parser.add_argument('--identity_initialize', dest='identity_initialize', action='store_true', help='if specified, initialize weights such that output is 1 sample RGB')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -533,6 +575,12 @@ def main():
     parser.set_defaults(unet=False)
     parser.set_defaults(batch_norm_only=False)
     parser.set_defaults(batch_norm=True)
+    parser.set_defaults(data_from_gpu=False)
+    parser.set_defaults(learn_scale=False)
+    parser.set_defaults(soft_scale=False)
+    parser.set_defaults(scale_ratio=False)
+    parser.set_defaults(use_sigmoid=False)
+    parser.set_defaults(identity_initialize=False)
 
     args = parser.parse_args()
 
@@ -557,6 +605,7 @@ def copy_option(args):
     delattr(new_args, 'accurate_timing')
     delattr(new_args, 'bilinear_upsampling')
     delattr(new_args, 'full_resolution')
+    delattr(new_args, 'data_from_gpu')
     return new_args
 
 def main_network(args):
@@ -635,7 +684,16 @@ def main_network(args):
         val_names = input_names
         val_img_names = output_names
 
-    if not args.debug_mode:
+    read_data_from_file = (not args.debug_mode) and (not args.data_from_gpu)
+
+    train_from_queue = False
+
+    if not read_data_from_file:
+        if args.use_queue:
+            args.use_queue = False
+            train_from_queue = True
+
+    if read_data_from_file:
         #is_train = tf.placeholder(tf.bool)
 
         if not args.use_queue:
@@ -704,7 +762,11 @@ def main_network(args):
             if args.full_resolution:
                 shader_samples /= (args.upsample_scale ** 2)
             print("sample count", shader_samples)
-            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name)
+            feature_w = []
+            color_inds = []
+            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds)
+            color_inds = color_inds[::-1]
+            debug_input = input_to_network
 
     with tf.control_dependencies([input_to_network]):
         if args.debug_mode and args.mean_estimator:
@@ -723,16 +785,17 @@ def main_network(args):
             alpha_val = 1.0
 
             if args.finetune:
-                orig_channel = args.orig_channel.split(',')
-                orig_channel = [int(i) for i in orig_channel]
-                input_stacks = []
-                for i in range(args.input_nc):
-                    ind = i % nfeatures
-                    if ind in orig_channel:
-                        input_stacks.append(input[:, :, :, i])
-                    else:
-                        input_stacks.append(input[:, :, :, i] * alpha)
-                input_to_network = tf.stack(input_stacks, axis=3)
+                if args.orig_channel != '':
+                    orig_channel = args.orig_channel.split(',')
+                    orig_channel = [int(i) for i in orig_channel]
+                    input_stacks = []
+                    for i in range(args.input_nc):
+                        ind = i % nfeatures
+                        if ind in orig_channel:
+                            input_stacks.append(input[:, :, :, i])
+                        else:
+                            input_stacks.append(input[:, :, :, i] * alpha)
+                    input_to_network = tf.stack(input_stacks, axis=3)
 
             if args.clip_weights_percentage_after_normalize > 0.0:
                 assert args.encourage_sparse_features
@@ -756,7 +819,7 @@ def main_network(args):
                     actual_initial_layer_channels *= args.nsamples
                     actual_nfeatures = args.input_nc
                 with tf.variable_scope("feature_reduction"):
-                    weights = tf.get_variable('w0', [1, 1, actual_nfeatures, actual_initial_layer_channels], initializer=tf.contrib.layers.xavier_initializer(), regularizer=regularizer)
+                    weights = tf.get_variable('w0', [1, 1, actual_nfeatures, actual_initial_layer_channels], initializer=tf.contrib.layers.xavier_initializer() if not args.identity_initialize else identity_initializer(color_inds), regularizer=regularizer)
                     if args.normalize_weights:
                         if args.abs_normalize:
                             column_sum = tf.reduce_sum(tf.abs(weights), [0, 1, 2])
@@ -807,7 +870,7 @@ def main_network(args):
                 else:
                     input_to_network = tf.image.resize_images(input_to_network, tf.stack([tf.shape(input_to_network)[1] * args.upsample_scale, tf.shape(input_to_network)[2] * args.upsample_scale]), method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
 
-            network=build(input_to_network, ini_id, regularizer_scale=args.regularizer_scale, share_weights=args.share_weights, final_layer_channels=args.final_layer_channels)
+            network=build(input_to_network, ini_id, regularizer_scale=args.regularizer_scale, share_weights=args.share_weights, final_layer_channels=args.final_layer_channels, identity_initialize=args.identity_initialize)
 
             if args.share_weights:
                 assert not args.use_batch
@@ -838,12 +901,13 @@ def main_network(args):
     loss_to_opt = loss + regularizer_loss
 
     if not (args.debug_mode and args.mean_estimator):
+        adam_optimizer = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
+        var_list = tf.trainable_variables()
         if args.update_bn:
             with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
-                opt=tf.train.AdamOptimizer(learning_rate=0.0001).minimize(loss_to_opt,var_list=[var for var in tf.trainable_variables()])
+                opt=adam_optimizer.minimize(loss_to_opt,var_list=var_list)
         else:
-            opt=tf.train.AdamOptimizer(learning_rate=0.0001).minimize(loss_to_opt,var_list=[var for var in tf.trainable_variables()])
-
+            opt=adam_optimizer.minimize(loss_to_opt,var_list=var_list)
         saver=tf.train.Saver(max_to_keep=1000)
 
     print("start sess")
@@ -857,7 +921,7 @@ def main_network(args):
     print("initialize global vars")
     sess.run(tf.global_variables_initializer())
 
-    if args.use_queue and not args.debug_mode:
+    if args.use_queue and read_data_from_file:
         print("start coord")
         coord = tf.train.Coordinator()
         print("start queue")
@@ -865,6 +929,8 @@ def main_network(args):
         print("start sleep")
         time.sleep(30)
         print("after sleep")
+
+    read_from_epoch = False
 
     if not (args.debug_mode and args.mean_estimator):
         read_from_epoch = True
@@ -880,32 +946,49 @@ def main_network(args):
         elif args.finetune:
             ckpt_orig = tf.train.get_checkpoint_state(args.orig_name)
             if ckpt_orig:
-                # from scope g_conv2 everything should be the same
-                # only g_conv1 is different
-                var_all = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
-                var_gconv1_exclude = [var for var in var_all if not var.name.startswith('g_conv1')]
-                var_gconv1_only = [var for var in var_all if var.name.startswith('g_conv1')]
-                orig_saver = tf.train.Saver(var_list=var_gconv1_exclude)
-                orig_saver.restore(sess, ckpt_orig.model_checkpoint_path)
-                g_conv1_dict = load_obj("%s/g_conv1.pkl"%(args.orig_name))
-                assert len(g_conv1_dict) == len(var_gconv1_only)
-                for var_gconv1 in var_gconv1_only:
-                    orig_val = g_conv1_dict[var_gconv1.name]
-                    if list(orig_val.shape) == var_gconv1.get_shape().as_list():
-                        sess.run(tf.assign(var_gconv1, orig_val))
-                    else:
-                        var_shape = var_gconv1.get_shape().as_list()
-                        assert len(orig_val.shape) == len(var_shape)
-                        assert len(orig_channel) == orig_val.shape[2]
-                        current_init_val = sess.run(var_gconv1)
-                        for c in range(len(orig_channel)):
-                            for n in range(args.nsamples):
-                                current_init_val[:, :, orig_channel[c] + n * nfeatures, :] = orig_val[:, :, c, :] / args.nsamples
-                        sess.run(tf.assign(var_gconv1, current_init_val))
+                if args.learn_scale:
+                    var_all = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
+                    var_restore = [var for var in var_all if ('feature_scale' not in var.name) and ('feature_bias' not in var.name)]
+                    saver_orig = tf.train.Saver(var_restore)
+                    saver_orig.restore(sess, ckpt_orig.model_checkpoint_path)
+                else:
+                    # from scope g_conv2 everything should be the same
+                    # only g_conv1 is different
+                    var_all = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
+                    var_gconv1_exclude = [var for var in var_all if not var.name.startswith('g_conv1')]
+                    var_gconv1_only = [var for var in var_all if var.name.startswith('g_conv1')]
+                    orig_saver = tf.train.Saver(var_list=var_gconv1_exclude)
+                    orig_saver.restore(sess, ckpt_orig.model_checkpoint_path)
+                    g_conv1_dict = load_obj("%s/g_conv1.pkl"%(args.orig_name))
+                    assert len(g_conv1_dict) == len(var_gconv1_only)
+                    for var_gconv1 in var_gconv1_only:
+                        orig_val = g_conv1_dict[var_gconv1.name]
+                        if list(orig_val.shape) == var_gconv1.get_shape().as_list():
+                            sess.run(tf.assign(var_gconv1, orig_val))
+                        else:
+                            var_shape = var_gconv1.get_shape().as_list()
+                            assert len(orig_val.shape) == len(var_shape)
+                            assert len(orig_channel) == orig_val.shape[2]
+                            current_init_val = sess.run(var_gconv1)
+                            for c in range(len(orig_channel)):
+                                for n in range(args.nsamples):
+                                    current_init_val[:, :, orig_channel[c] + n * nfeatures, :] = orig_val[:, :, c, :] / args.nsamples
+                            sess.run(tf.assign(var_gconv1, current_init_val))
 
     save_frequency = 1
     num_epoch = args.epoch
     #assert num_epoch % save_frequency == 0
+
+    if args.is_train or args.test_training:
+        camera_pos_vals = np.load(os.path.join(args.dataroot, 'train.npy'))
+        time_vals = np.load(os.path.join(args.dataroot, 'train_time.npy'))
+    else:
+        camera_pos_vals = np.concatenate((
+                            np.load(os.path.join(args.dataroot, 'test_close.npy')),
+                            np.load(os.path.join(args.dataroot, 'test_far.npy')),
+                            np.load(os.path.join(args.dataroot, 'test_middle.npy'))
+                            ), axis=0)
+        time_vals = np.load(os.path.join(args.dataroot, 'test_time.npy'))
 
     def read_ind(img_arr, name_arr, id, is_npy):
         img_arr[id] = read_name(name_arr[id], is_npy)
@@ -937,7 +1020,7 @@ def main_network(args):
         else:
             return np.fromfile(name, dtype=np.float32).reshape([640, 960, args.input_nc])
 
-    if args.preload and not args.use_queue:
+    if read_data_from_file and args.preload and (not args.use_queue):
         eval_images = [None] * len(val_names)
         eval_out_images = [None] * len(val_names)
         for id in range(len(val_names)):
@@ -951,7 +1034,7 @@ def main_network(args):
     if args.is_train:
         all=np.zeros(len(input_names), dtype=float)
 
-        if args.preload and not args.use_queue:
+        if read_data_from_file and args.preload and (not args.use_queue):
             input_images=[None]*len(input_names)
             output_images=[None]*len(input_names)
 
@@ -974,6 +1057,8 @@ def main_network(args):
         num_transition_epoch = 20
         alpha_schedule = np.logspace(alpha_start, alpha_end, num_transition_epoch)
         printval = False
+
+        min_avg_loss = 1e20
 
         for epoch in range(1, num_epoch+1):
 
@@ -999,14 +1084,14 @@ def main_network(args):
                 start_id = i * args.batch_size
                 end_id = min(len(input_names), (i+1)*args.batch_size)
 
-                if i == nupdates - 1:
+                if False:
                     run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                     run_metadata = tf.RunMetadata()
                 else:
                     run_options = None
                     run_metadata = None
 
-                if not args.use_queue:
+                if (not args.use_queue) and read_data_from_file:
                     if args.preload:
                         if not args.use_batch:
                             input_image = input_images[permutation[i]]
@@ -1024,11 +1109,25 @@ def main_network(args):
                             # TODO: should complete this logic
                             raise
                     _,current=sess.run([opt,loss],feed_dict={input:input_image,output:output_image, alpha: alpha_val}, options=run_options, run_metadata=run_metadata)
-                else:
+                elif args.use_queue:
                     if not printval:
                         print("first time arriving before sess, wish me best luck")
                         printval = True
                     _,current=sess.run([opt,loss],feed_dict={alpha: alpha_val}, options=run_options, run_metadata=run_metadata)
+                else:
+                    camera_val = camera_pos_vals[permutation[i], :]
+                    feed_dict = {camera_pos: camera_val, shader_time: [time_vals[permutation[i]]]}
+                    output_arr = np.expand_dims(read_name(output_names[permutation[i]], False), axis=0)
+                    if train_from_queue:
+                        output_arr = output_arr[..., ::-1]
+                    feed_dict[output] = output_arr
+                    _,current=sess.run([opt,loss],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
+
+                if args.learn_scale:
+                    feature_val = sess.run(feature_w)
+                    if numpy.sum(numpy.isnan(feature_val)) > 0:
+                        print(feature_val)
+
                 if run_metadata is not None and args.generate_timeline:
                     fetched_timeline = timeline.Timeline(run_metadata.step_stats)
                     chrome_trace = fetched_timeline.generate_chrome_trace_format()
@@ -1040,6 +1139,9 @@ def main_network(args):
                 print("%d %d %.2f %.2f %.2f %s"%(epoch,cnt,current*255.0*255.0,np.mean(all[np.where(all)]),time.time()-st,os.getcwd().split('/')[-2]))
 
             avg_loss = np.mean(all[np.where(all)])
+
+            if min_avg_loss > avg_loss:
+                min_avg_loss = avg_loss
 
             summary = tf.Summary()
             summary.value.add(tag='avg_loss', simple_value=avg_loss)
@@ -1091,7 +1193,8 @@ def main_network(args):
                 #target.write("%f, %f, %f, %f"%(avg_test_close, avg_test_far, avg_test_middle, avg_test_all))
                 #target.close()
 
-                saver.save(sess,"%s/model.ckpt"%args.name)
+                if min_avg_loss == avg_loss:
+                    saver.save(sess,"%s/model.ckpt"%args.name)
                 saver.save(sess,"%s/%04d/model.ckpt"%(args.name,epoch))
 
         var_list_gconv1 = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='g_conv1')
@@ -1101,7 +1204,7 @@ def main_network(args):
         save_obj(g_conv1_dict, "%s/g_conv1.pkl"%(args.name))
 
     if not args.is_train:
-        if args.debug_mode:
+        if not read_data_from_file:
             if args.test_training:
                 camera_pos_vals = np.load(os.path.join(args.dataroot, 'train.npy'))
                 time_vals = np.load(os.path.join(args.dataroot, 'train_time.npy'))
@@ -1114,16 +1217,21 @@ def main_network(args):
                 time_vals = np.load(os.path.join(args.dataroot, 'test_time.npy'))
             if args.mean_estimator:
                 debug_dir = "%s/mean%d"%(args.name, args.estimator_samples)
+                debug_dir += '_test' if not args.test_training else '_train'
                 #debug_dir = "%s/mean%d"%('/localtmp/yuting', args.estimator_samples)
             else:
-                debug_dir = "%s/debug"%args.name
+                #debug_dir = "%s/debug"%args.name
+                debug_dir = args.name + '/' + ('test' if not args.test_training else 'train')
+                if args.debug_mode:
+                    debug_dir += '_debug'
                 #debug_dir = "%s/debug"%'/localtmp/yuting'
 
             debug_dir += '_bilinear' if args.bilinear_upsampling else ''
 
             debug_dir += '_full' if args.full_resolution else ''
 
-            debug_dir += '_test' if not args.test_training else '_train'
+            if read_from_epoch:
+                debug_dir += "_epoch_%04d"%args.which_epoch
 
             if not os.path.isdir(debug_dir):
                 os.makedirs(debug_dir)
@@ -1152,13 +1260,13 @@ def main_network(args):
                     st2 = time.time()
                     print("rough time estimate:", st2 - st)
                     #pctx.profiler.profile_operations(options=opts)
-                    if args.use_queue:
+                    if train_from_queue or args.mean_estimator:
                         output_image = output_image[:, :, :, ::-1]
                     print("output_image swap axis")
                     loss_val = np.mean((output_image - output_ground) ** 2) * 255.0 * 255.0
                     print("loss", loss_val)
                     all_test[i] = loss_val
-                    output_image=np.minimum(np.maximum(output_image,0.0),1.0)
+                    output_image=np.clip(output_image,0.0,1.0)
                     print("output_image clipped")
                     output_image *= 255.0
                     print("output_image scaled")
@@ -1356,7 +1464,7 @@ def main_network(args):
         target=open(os.path.join(test_dirname, 'score.txt'),'w')
         target.write("%f"%np.mean(all_test[np.where(all_test)]))
         target.close()
-        if len(val_names) == 30:
+        if len(val_img_names) == 30:
             score_close = np.mean(all_test[:5])
             score_far = np.mean(all_test[5:10])
             score_middle = np.mean(all_test[10:])
@@ -1375,7 +1483,10 @@ def main_network(args):
     sess.close()
 
     if not args.is_train:
-        os.system('source activate pytorch36 && CUDA_VISIBLE_DEVICES=2, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir)
+        check_command = 'source activate pytorch36 && CUDA_VISIBLE_DEVICES=2, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir + ' source activate tensorflow35'
+        #check_command = 'python plot_clip_weights.py ' + test_dirname + ' ' + grounddir
+        subprocess.check_output(check_command, shell=True)
+        #os.system('source activate pytorch36 && CUDA_VISIBLE_DEVICES=2, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir)
 
 if __name__ == '__main__':
     main()
