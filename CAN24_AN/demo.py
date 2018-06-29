@@ -4,6 +4,7 @@ import tensorflow as tf
 import tensorflow.contrib.slim as slim
 import numpy as np
 import numpy
+import numpy.random
 import random
 import argparse_util
 import pickle
@@ -11,6 +12,8 @@ from tensorflow.python.client import timeline
 import copy
 from shaders import *
 import sys; sys.path += ['../../global_opt/proj/apps']
+sys.path += ['../../tensorflow-vgg']
+import vgg16
 #import compiler_problem
 from unet import unet
 import importlib
@@ -26,6 +29,12 @@ height = 400
 dtype = tf.float32
 
 batch_norm_is_training = True
+
+allow_nonzero = False
+
+identity_output_layer = True
+
+less_aggresive_ini = False
 
 def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[]):
     # 2x_1sample on margo
@@ -125,9 +134,10 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                 actual_ind = valid_inds.index(raw_ind)
                 color_inds.append(actual_ind)
 
-            for ind in color_inds:
-                feature_bias[ind] = 0.0
-                feature_scale[ind] = 1.0
+            if output_type not in ['rgb', 'bgr']:
+                for ind in color_inds:
+                    feature_bias[ind] = 0.0
+                    feature_scale[ind] = 1.0
 
             if output_type == 'remove_constant':
                 features = tf.cast(tf.stack([features[k] for k in valid_inds], axis=3), tf.float32)
@@ -319,17 +329,35 @@ def lrelu(x):
 
 def identity_initializer(in_channels=[], allow_map_to_less=False):
     def _initializer(shape, dtype=tf.float32, partition_info=None):
-        array = np.zeros(shape, dtype=float)
+        if not allow_nonzero:
+            print('initializing all zero')
+            array = np.zeros(shape, dtype=float)
+        else:
+            x = np.sqrt(6.0 / (shape[2] + shape[3])) / 1.5
+            array = numpy.random.uniform(-x, x, size=shape)
+            print('initializing xavier')
+            #return tf.constant(array, dtype=dtype)
         cx, cy = shape[0]//2, shape[1]//2
         if len(in_channels) > 0:
-            for k in range(len(in_channels)):
-                array[cx, cy, in_channels[k], k] = 1
+            input_inds = in_channels
+            output_inds = range(len(in_channels))
+            #for k in range(len(in_channels)):
+            #    array[cx, cy, in_channels[k], k] = 1
         elif allow_map_to_less:
-            for i in range(min(shape[2], shape[3])):
-                array[cx, cy, i, i] = 1
+            input_inds = range(min(shape[2], shape[3]))
+            output_inds = input_inds
+            #for i in range(min(shape[2], shape[3])):
+            #    array[cx, cy, i, i] = 1
         else:
-            for i in range(shape[2]):
-                array[cx, cy, i, i] = 1
+            input_inds = range(shape[2])
+            output_inds = input_inds
+            #for i in range(shape[2]):
+            #    array[cx, cy, i, i] = 1
+        for i in range(len(input_inds)):
+            if less_aggresive_ini:
+                array[cx, cy, input_inds[i], output_inds[i]] *= 10.0
+            else:
+                array[cx, cy, input_inds[i], output_inds[i]] = 1.0
         return tf.constant(array, dtype=dtype)
     return _initializer
 
@@ -389,7 +417,8 @@ def build(input, ini_id=True, regularizer_scale=0.0, share_weights=False, final_
 
     if share_weights:
         net = tf.expand_dims(tf.reduce_mean(net, 0), 0)
-    net=slim.conv2d(net,3,[1,1],rate=1,activation_fn=None,scope='g_conv_last',weights_regularizer=regularizer, weights_initializer=identity_initializer(allow_map_to_less=True) if identity_initialize else tf.contrib.layers.xavier_initializer())
+    print('identity last layer?', identity_initialize and identity_output_layer)
+    net=slim.conv2d(net,3,[1,1],rate=1,activation_fn=None,scope='g_conv_last',weights_regularizer=regularizer, weights_initializer=identity_initializer(allow_map_to_less=True) if (identity_initialize and identity_output_layer) else tf.contrib.layers.xavier_initializer())
     return net
 
 def prepare_data(task):
@@ -539,6 +568,12 @@ def main():
     parser.add_argument('--scale_ratio', dest='scale_ratio', action='store_true', help='if specified, learn the ratio of scale and bias')
     parser.add_argument('--use_sigmoid', dest='use_sigmoid', action='store_true', help='if specified, use sigmoid as soft scale')
     parser.add_argument('--identity_initialize', dest='identity_initialize', action='store_true', help='if specified, initialize weights such that output is 1 sample RGB')
+    parser.add_argument('--nonzero_ini', dest='allow_nonzero', action='store_true', help='if specified, use xavier for all those supposed to be 0 entries in identity_initializer')
+    parser.add_argument('--no_identity_output_layer', dest='identity_output_layer', action='store_false', help='if specified, do not use identity mapping for output layer')
+    parser.add_argument('--less_aggresive_ini', dest='less_aggresive_ini', action='store_true', help='if specified, use a less aggresive way to initialize RGB weights (multiples of the original xavier weights)')
+    parser.add_argument('--orig_rgb', dest='orig_rgb', action='store_true', help='if specified, original channel before finetune is rgb')
+    parser.add_argument('--perceptual_loss', dest='perceptual_loss', action='store_true',help='if specified, use perceptual loss as well as L2 loss')
+    parser.add_argument('--perceptual_loss_term', dest='perceptual_loss_term', default='conv1_1', help='specify to use which layer in vgg16 as perceptual loss')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -581,6 +616,11 @@ def main():
     parser.set_defaults(scale_ratio=False)
     parser.set_defaults(use_sigmoid=False)
     parser.set_defaults(identity_initialize=False)
+    parser.set_defaults(allow_nonzero=False)
+    parser.set_defaults(identity_output_layer=True)
+    parser.set_defaults(less_aggresive_ini=False)
+    parser.set_defaults(orig_rgb=False)
+    parser.set_defaults(perceptual_loss=False)
 
     args = parser.parse_args()
 
@@ -678,6 +718,15 @@ def main_network(args):
         global nm
         nm = None
         args.update_bn = False
+
+    global allow_nonzero
+    allow_nonzero = args.allow_nonzero
+
+    global identity_output_layer
+    identity_output_layer = args.identity_output_layer
+
+    global less_aggresive_ini
+    less_aggresive_ini = args.less_aggresive_ini
 
     input_names, output_names, val_names, val_img_names = prepare_data_root(args.dataroot)
     if args.test_training:
@@ -796,6 +845,8 @@ def main_network(args):
                         else:
                             input_stacks.append(input[:, :, :, i] * alpha)
                     input_to_network = tf.stack(input_stacks, axis=3)
+                elif args.orig_rgb and args.data_from_gpu:
+                    orig_channel = color_inds
 
             if args.clip_weights_percentage_after_normalize > 0.0:
                 assert args.encourage_sparse_features
@@ -885,6 +936,13 @@ def main_network(args):
                 alpha_val = 1.0
 
     loss=tf.reduce_mean(tf.square(network-output))
+    if args.perceptual_loss:
+        vgg_in = vgg16.Vgg16()
+        vgg_in.build(network)
+        vgg_out = vgg16.Vgg16()
+        vgg_out.build(output)
+        loss += tf.reduce_mean(tf.square(getattr(vgg_in, args.perceptual_loss_term) - getattr(vgg_out, args.perceptual_loss_term)))
+
     avg_loss = 0
     tf.summary.scalar('avg_loss', avg_loss)
     avg_test_close = 0
@@ -921,6 +979,15 @@ def main_network(args):
     print("initialize global vars")
     sess.run(tf.global_variables_initializer())
 
+    if args.encourage_sparse_features:
+        exclude_prefix = 'feature_reduction'
+    elif args.add_initial_layers:
+        exclude_prefix = 'initial_0'
+    else:
+        exclude_prefix = 'g_conv1'
+    var_all = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
+    var_first_layer_only = [var for var in var_all if var.name.startswith(exclude_prefix)]
+
     if args.use_queue and read_data_from_file:
         print("start coord")
         coord = tf.train.Coordinator()
@@ -947,33 +1014,34 @@ def main_network(args):
             ckpt_orig = tf.train.get_checkpoint_state(args.orig_name)
             if ckpt_orig:
                 if args.learn_scale:
-                    var_all = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
+                    #var_all = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
                     var_restore = [var for var in var_all if ('feature_scale' not in var.name) and ('feature_bias' not in var.name)]
                     saver_orig = tf.train.Saver(var_restore)
                     saver_orig.restore(sess, ckpt_orig.model_checkpoint_path)
                 else:
                     # from scope g_conv2 everything should be the same
                     # only g_conv1 is different
-                    var_all = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
-                    var_gconv1_exclude = [var for var in var_all if not var.name.startswith('g_conv1')]
-                    var_gconv1_only = [var for var in var_all if var.name.startswith('g_conv1')]
-                    orig_saver = tf.train.Saver(var_list=var_gconv1_exclude)
+                    #var_all = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
+                    #var_gconv1_exclude = [var for var in var_all if not var.name.startswith('g_conv1')]
+                    #var_gconv1_only = [var for var in var_all if var.name.startswith('g_conv1')]
+                    var_exclude_first_layer = [var for var in var_all if not var.name.startswith(exclude_prefix)]
+                    orig_saver = tf.train.Saver(var_list=var_exclude_first_layer)
                     orig_saver.restore(sess, ckpt_orig.model_checkpoint_path)
-                    g_conv1_dict = load_obj("%s/g_conv1.pkl"%(args.orig_name))
-                    assert len(g_conv1_dict) == len(var_gconv1_only)
-                    for var_gconv1 in var_gconv1_only:
-                        orig_val = g_conv1_dict[var_gconv1.name]
-                        if list(orig_val.shape) == var_gconv1.get_shape().as_list():
-                            sess.run(tf.assign(var_gconv1, orig_val))
+                    first_layer_dict = load_obj("%s/first_layer.pkl"%(args.orig_name))
+                    assert len(first_layer_dict) == len(var_first_layer_only)
+                    for var in var_first_layer_only:
+                        orig_val = first_layer_dict[var.name]
+                        if list(orig_val.shape) == var.get_shape().as_list():
+                            sess.run(tf.assign(var, orig_val))
                         else:
-                            var_shape = var_gconv1.get_shape().as_list()
+                            var_shape = var.get_shape().as_list()
                             assert len(orig_val.shape) == len(var_shape)
                             assert len(orig_channel) == orig_val.shape[2]
-                            current_init_val = sess.run(var_gconv1)
+                            current_init_val = sess.run(var)
                             for c in range(len(orig_channel)):
                                 for n in range(args.nsamples):
                                     current_init_val[:, :, orig_channel[c] + n * nfeatures, :] = orig_val[:, :, c, :] / args.nsamples
-                            sess.run(tf.assign(var_gconv1, current_init_val))
+                            sess.run(tf.assign(var, current_init_val))
 
     save_frequency = 1
     num_epoch = args.epoch
@@ -1197,11 +1265,11 @@ def main_network(args):
                     saver.save(sess,"%s/model.ckpt"%args.name)
                 saver.save(sess,"%s/%04d/model.ckpt"%(args.name,epoch))
 
-        var_list_gconv1 = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='g_conv1')
-        g_conv1_dict = {}
-        for var_gconv1 in var_list_gconv1:
-            g_conv1_dict[var_gconv1.name] = sess.run(var_gconv1)
-        save_obj(g_conv1_dict, "%s/g_conv1.pkl"%(args.name))
+        #var_list_gconv1 = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='g_conv1')
+        #g_conv1_dict = {}
+        #for var_gconv1 in var_list_gconv1:
+        #    g_conv1_dict[var_gconv1.name] = sess.run(var_gconv1)
+        #save_obj(g_conv1_dict, "%s/g_conv1.pkl"%(args.name))
 
     if not args.is_train:
         if not read_data_from_file:
@@ -1476,6 +1544,11 @@ def main_network(args):
             grounddir = os.path.join(args.dataroot, 'train_img')
         else:
             grounddir = os.path.join(args.dataroot, 'test_img')
+
+    first_layer_dict = {}
+    for var in var_first_layer_only:
+        first_layer_dict[var.name] = sess.run(var)
+    save_obj(first_layer_dict, "%s/first_layer.pkl"%(args.name))
 
     if args.use_queue and not args.debug_mode:
         coord.request_stop()
