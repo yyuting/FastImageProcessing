@@ -140,7 +140,16 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                     feature_scale[ind] = 1.0
 
             if output_type == 'remove_constant':
-                features = tf.cast(tf.stack([features[k] for k in valid_inds], axis=3), tf.float32)
+                features = tf.parallel_stack([features[k] for k in valid_inds])
+                features = tf.transpose(features, [1, 2, 3, 0])
+                if False:
+                    valid_features = [features[k] for k in valid_inds]
+                    features_tensor = tf.Variable(np.empty([1, height, width, len(valid_inds)]), dtype=tf.float32, trainable=False)
+                    assign_ops = []
+                    for k in range(len(valid_inds)):
+                        assign_ops.append(features_tensor[:, :, :, k].assign(valid_features[k]))
+                    with tf.control_dependencies(assign_ops):
+                        features = tf.identity(features_tensor)
             elif output_type == 'all':
                 features = tf.cast(tf.stack(features, axis=3), tf.float32)
             elif output_type in ['rgb', 'bgr']:
@@ -941,7 +950,8 @@ def main_network(args):
         vgg_in.build(network)
         vgg_out = vgg16.Vgg16()
         vgg_out.build(output)
-        loss += tf.reduce_mean(tf.square(getattr(vgg_in, args.perceptual_loss_term) - getattr(vgg_out, args.perceptual_loss_term)))
+        loss_vgg = tf.reduce_mean(tf.square(getattr(vgg_in, args.perceptual_loss_term) - getattr(vgg_out, args.perceptual_loss_term)))
+        loss += 0.0001 * loss_vgg
 
     avg_loss = 0
     tf.summary.scalar('avg_loss', avg_loss)
@@ -966,7 +976,7 @@ def main_network(args):
                 opt=adam_optimizer.minimize(loss_to_opt,var_list=var_list)
         else:
             opt=adam_optimizer.minimize(loss_to_opt,var_list=var_list)
-        saver=tf.train.Saver(max_to_keep=1000)
+        saver=tf.train.Saver(tf.trainable_variables(), max_to_keep=1000)
 
     print("start sess")
     #sess = tf.Session(config=tf.ConfigProto(inter_op_parallelism_threads=10, intra_op_parallelism_threads=3))
@@ -1189,7 +1199,7 @@ def main_network(args):
                     if train_from_queue:
                         output_arr = output_arr[..., ::-1]
                     feed_dict[output] = output_arr
-                    _,current=sess.run([opt,loss],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
+                    _,current, loss_vgg_val =sess.run([opt,loss, loss_vgg],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
 
                 if args.learn_scale:
                     feature_val = sess.run(feature_w)
@@ -1204,7 +1214,7 @@ def main_network(args):
                 #_,current=sess.run([opt,loss],feed_dict={input:input_image,output:output_image, alpha: alpha_val})
                 all[permutation[start_id:end_id]]=current*255.0*255.0
                 cnt += args.batch_size if args.use_batch else 1
-                print("%d %d %.2f %.2f %.2f %s"%(epoch,cnt,current*255.0*255.0,np.mean(all[np.where(all)]),time.time()-st,os.getcwd().split('/')[-2]))
+                print("%d %d %.2f %.2f %.2f %.2f %s"%(epoch,cnt,current*255.0*255.0,np.mean(all[np.where(all)]),loss_vgg_val, time.time()-st,os.getcwd().split('/')[-2]))
 
             avg_loss = np.mean(all[np.where(all)])
 
