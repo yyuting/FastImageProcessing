@@ -138,14 +138,16 @@ def simplex_noise_2arg(x, y):
     xx /= scale
     yy /= scale
 
+    x_shape = x.get_shape().as_list()
+
     zz = 10 * tf.linspace(0.0, (phases - 1), int(phases))
     zz = tf.expand_dims(tf.expand_dims(tf.expand_dims(zz, axis=0), axis=0), axis=0)
-    zz = tf.cast(tf.tile(zz, [tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2], 1]), tf.float32)
+    zz = tf.cast(tf.tile(zz, [x_shape[0], x_shape[1], x_shape[2], 1]), tf.float32)
 
-    length = tf.shape(x)[0] * tf.shape(x)[1] * tf.shape(x)[2] * int(phases)
+    length = x_shape[0] * x_shape[1] * x_shape[2] * int(phases)
     input_vectors = tf.reshape(tf.stack([xx, yy, zz], axis=4), [length, 3])
     noise = noise3d(input_vectors, np_perm, np_grad3, np_vertex_table, length)
-    reshaped_noise = tf.reshape(noise, [tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2], int(phases)])
+    reshaped_noise = tf.reshape(noise, [x_shape[0], x_shape[1], x_shape[2], int(phases)])
     reshaped_noise /= tf.cast(tf.pow(2.0, tf.linspace(0.0, (phases - 1), int(phases))), tf.float32)
     noise_sum = tf.reduce_sum(reshaped_noise, 3)
     return 4.0 * noise_sum

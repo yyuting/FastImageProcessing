@@ -19,6 +19,7 @@ from unet import unet
 import importlib
 import importlib.util
 import subprocess
+import shutil
 
 allowed_dtypes = ['float64', 'float32', 'uint8']
 no_L1_reg_other_layers = True
@@ -475,11 +476,14 @@ def prepare_data_zigzag(task):
         val_names.append(os.path.join(test_input_dir, file))
     return input_names,output_names,val_names,finetune_input_names,finetune_output_names
 
-def prepare_data_root(dataroot):
+def prepare_data_root(dataroot, use_weight_map=False):
     input_names=[]
     output_names=[]
     val_names=[]
     val_img_names=[]
+    map_names = []
+    val_map_names = []
+
     train_input_dir = os.path.join(dataroot, 'train_label')
     test_input_dir = os.path.join(dataroot, 'test_label')
     train_output_dir = os.path.join(dataroot, 'train_img')
@@ -493,7 +497,17 @@ def prepare_data_root(dataroot):
         val_names.append(os.path.join(test_input_dir, file))
     for file in sorted(os.listdir(test_output_dir)):
         val_img_names.append(os.path.join(test_output_dir, file))
-    return input_names, output_names, val_names, val_img_names
+
+    if use_weight_map:
+        train_map_dir = os.path.join(dataroot, 'train_map')
+        test_map_dir = os.path.join(dataroot, 'test_map')
+        for file in sorted(os.listdir(train_map_dir)):
+            map_names.append(os.path.join(train_map_dir, file))
+        for file in sorted(os.listdir(test_map_dir)):
+            val_map_names.append(os.path.join(test_map_dir, file))
+
+    return input_names, output_names, val_names, val_img_names, map_names, val_map_names
+
 
 os.system('nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp')
 os.environ['CUDA_VISIBLE_DEVICES']=str(np.argmax([int(x.split()[2]) for x in open('tmp','r').readlines()]))
@@ -583,6 +597,11 @@ def main():
     parser.add_argument('--orig_rgb', dest='orig_rgb', action='store_true', help='if specified, original channel before finetune is rgb')
     parser.add_argument('--perceptual_loss', dest='perceptual_loss', action='store_true',help='if specified, use perceptual loss as well as L2 loss')
     parser.add_argument('--perceptual_loss_term', dest='perceptual_loss_term', default='conv1_1', help='specify to use which layer in vgg16 as perceptual loss')
+    parser.add_argument('--use_weight_map', dest='use_weight_map', action='store_true', help='if specified, use weight map to guide loss calculation')
+    parser.add_argument('--perceptual_loss_scale', dest='perceptual_loss_scale', type=float, default=0.0001, help='used to scale perceptual loss')
+    parser.add_argument('--render_only', dest='render_only', action='store_true', help='if specified, render using given camera pos, does not calculate loss')
+    parser.add_argument('--render_camera_pos', dest='render_camera_pos', default='camera_pos.npy', help='used to render result')
+    parser.add_argument('--render_t', dest='render_t', default='render_t.npy', help='used to render output')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -630,6 +649,7 @@ def main():
     parser.set_defaults(less_aggresive_ini=False)
     parser.set_defaults(orig_rgb=False)
     parser.set_defaults(perceptual_loss=False)
+    parser.set_defaults(use_weight_map=False)
 
     args = parser.parse_args()
 
@@ -655,6 +675,9 @@ def copy_option(args):
     delattr(new_args, 'bilinear_upsampling')
     delattr(new_args, 'full_resolution')
     delattr(new_args, 'data_from_gpu')
+    delattr(new_args, 'render_only')
+    delattr(new_args, 'render_camera_pos')
+    delattr(new_args, 'render_t')
     return new_args
 
 def main_network(args):
@@ -737,10 +760,14 @@ def main_network(args):
     global less_aggresive_ini
     less_aggresive_ini = args.less_aggresive_ini
 
-    input_names, output_names, val_names, val_img_names = prepare_data_root(args.dataroot)
+    if args.render_only:
+        args.is_train = False
+
+    input_names, output_names, val_names, val_img_names, map_names, val_map_names = prepare_data_root(args.dataroot, use_weight_map=args.use_weight_map)
     if args.test_training:
         val_names = input_names
         val_img_names = output_names
+        val_map_names = map_names
 
     read_data_from_file = (not args.debug_mode) and (not args.data_from_gpu)
 
@@ -944,14 +971,19 @@ def main_network(args):
                 alpha = tf.placeholder(tf.float32)
                 alpha_val = 1.0
 
-    loss=tf.reduce_mean(tf.square(network-output))
+    if not args.use_weight_map:
+        loss=tf.reduce_mean(tf.square(network-output))
+    else:
+        weight_map = tf.placeholder(tf.float32,shape=[None,None,None])
+        loss_map = tf.reduce_mean(tf.square(network - output), axis=3)
+        loss = tf.reduce_mean(loss_map * weight_map)
     if args.perceptual_loss:
         vgg_in = vgg16.Vgg16()
         vgg_in.build(network)
         vgg_out = vgg16.Vgg16()
         vgg_out.build(output)
         loss_vgg = tf.reduce_mean(tf.square(getattr(vgg_in, args.perceptual_loss_term) - getattr(vgg_out, args.perceptual_loss_term)))
-        loss += 0.0001 * loss_vgg
+        loss += args.perceptual_loss_scale * loss_vgg
 
     avg_loss = 0
     tf.summary.scalar('avg_loss', avg_loss)
@@ -1084,7 +1116,8 @@ def main_network(args):
             return np.float32(cv2.imread(name, -1)) / 255.0
         elif is_npy:
             ans = np.load(name)
-            if not args.debug_mode:
+            #if not args.debug_mode:
+            if True:
                 return ans
             else:
                 all_ind = np.empty(0)
@@ -1199,7 +1232,9 @@ def main_network(args):
                     if train_from_queue:
                         output_arr = output_arr[..., ::-1]
                     feed_dict[output] = output_arr
-                    _,current, loss_vgg_val =sess.run([opt,loss, loss_vgg],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
+                    if args.use_weight_map:
+                        feed_dict[weight_map] = np.expand_dims(read_name(map_names[permutation[i]], True), axis=0)
+                    _,current =sess.run([opt,loss],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
 
                 if args.learn_scale:
                     feature_val = sess.run(feature_w)
@@ -1214,7 +1249,7 @@ def main_network(args):
                 #_,current=sess.run([opt,loss],feed_dict={input:input_image,output:output_image, alpha: alpha_val})
                 all[permutation[start_id:end_id]]=current*255.0*255.0
                 cnt += args.batch_size if args.use_batch else 1
-                print("%d %d %.2f %.2f %.2f %.2f %s"%(epoch,cnt,current*255.0*255.0,np.mean(all[np.where(all)]),loss_vgg_val, time.time()-st,os.getcwd().split('/')[-2]))
+                print("%d %d %.2f %.2f %.2f %s"%(epoch,cnt,current*255.0*255.0,np.mean(all[np.where(all)]),time.time()-st,os.getcwd().split('/')[-2]))
 
             avg_loss = np.mean(all[np.where(all)])
 
@@ -1283,7 +1318,10 @@ def main_network(args):
 
     if not args.is_train:
         if not read_data_from_file:
-            if args.test_training:
+            if args.render_only:
+                camera_pos_vals = np.load(args.render_camera_pos)
+                time_vals = np.load(args.render_t)
+            elif args.test_training:
                 camera_pos_vals = np.load(os.path.join(args.dataroot, 'train.npy'))
                 time_vals = np.load(os.path.join(args.dataroot, 'train_time.npy'))
             else:
@@ -1293,7 +1331,10 @@ def main_network(args):
                                     np.load(os.path.join(args.dataroot, 'test_middle.npy'))
                                     ), axis=0)
                 time_vals = np.load(os.path.join(args.dataroot, 'test_time.npy'))
-            if args.mean_estimator:
+
+            if args.render_only:
+                debug_dir = args.name + '/render'
+            elif args.mean_estimator:
                 debug_dir = "%s/mean%d"%(args.name, args.estimator_samples)
                 debug_dir += '_test' if not args.test_training else '_train'
                 #debug_dir = "%s/mean%d"%('/localtmp/yuting', args.estimator_samples)
@@ -1314,6 +1355,13 @@ def main_network(args):
             if not os.path.isdir(debug_dir):
                 os.makedirs(debug_dir)
 
+            if args.render_only and os.path.exists(os.path.join(debug_dir, 'video.mp4')):
+                os.remove(os.path.join(debug_dir, 'video.mp4'))
+
+            if args.render_only:
+                shutil.copyfile(args.render_camera_pos, os.path.join(debug_dir, 'camera_pos.npy'))
+                shutil.copyfile(args.render_t, os.path.join(debug_dir, 'render_t.npy'))
+
             if args.generate_timeline:
                 run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                 run_metadata = tf.RunMetadata()
@@ -1324,40 +1372,59 @@ def main_network(args):
             #opts = builder(builder.time_and_memory()).order_by('micros').build()
             #with tf.contrib.tfprof.ProfileContext('/tmp/train_dir', trace_steps=[], dump_steps=[]) as pctx:
             if True:
-                all_test = np.zeros(len(val_img_names), dtype=float)
-                for i in range(len(val_img_names)):
-                    output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
-                    print("output_ground get")
-                    camera_val = camera_pos_vals[i, :]
-                    feed_dict = {camera_pos: camera_val, shader_time: time_vals[i:i+1]}
-                    print("feed_dict generated")
-                    #pctx.trace_next_step()
-                    #pctx.dump_next_step()
-                    st = time.time()
-                    output_image = sess.run(network, options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
-                    st2 = time.time()
-                    print("rough time estimate:", st2 - st)
-                    #pctx.profiler.profile_operations(options=opts)
-                    if train_from_queue or args.mean_estimator:
-                        output_image = output_image[:, :, :, ::-1]
-                    print("output_image swap axis")
-                    loss_val = np.mean((output_image - output_ground) ** 2) * 255.0 * 255.0
-                    print("loss", loss_val)
-                    all_test[i] = loss_val
-                    output_image=np.clip(output_image,0.0,1.0)
-                    print("output_image clipped")
-                    output_image *= 255.0
-                    print("output_image scaled")
-                    cv2.imwrite("%s/%06d.png"%(debug_dir, i+1),np.uint8(output_image[0,:,:,:]))
-                    print("output_image written")
-                    if args.generate_timeline:
-                        fetched_timeline = timeline.Timeline(run_metadata.step_stats)
-                        print("trace fetched")
-                        chrome_trace = fetched_timeline.generate_chrome_trace_format()
-                        print("chrome trace generated")
-                        with open("%s/nn_%d.json"%(debug_dir, i+1), 'w') as f:
-                            f.write(chrome_trace)
-                        print("trace written")
+                if args.render_only:
+                    for i in range(time_vals.shape[0]):
+                        feed_dict = {camera_pos: camera_pos_vals[i, :], shader_time: time_vals[i:i+1]}
+                        output_image = sess.run(network, feed_dict=feed_dict)
+                        output_image = np.clip(output_image,0.0,1.0)
+                        output_image *= 255.0
+                        cv2.imwrite("%s/%06d.png"%(debug_dir, i+1),np.uint8(output_image[0,:,:,:]))
+                        print('finished', i)
+                    os.system('ffmpeg -i %s -r 30 -c:v libx264 -preset slow -crf 0 %s'%(os.path.join(debug_dir, '%06d.png'), os.path.join(debug_dir, 'video.mp4')))
+                    open(os.path.join(debug_dir, 'index.html'), 'w+').write("""
+<html>
+<body>
+<br><video controls><source src="video.mp4" type="video/mp4"></video><br>
+</body>
+</html>""")
+                    return
+                else:
+                    all_test = np.zeros(len(val_img_names), dtype=float)
+                    for i in range(len(val_img_names)):
+                        output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
+                        print("output_ground get")
+                        camera_val = camera_pos_vals[i, :]
+                        feed_dict = {camera_pos: camera_val, shader_time: time_vals[i:i+1]}
+                        if args.use_weight_map:
+                            feed_dict[weight_map] = np.expand_dims(read_name(val_map_names[i], True), 0)
+                        print("feed_dict generated")
+                        #pctx.trace_next_step()
+                        #pctx.dump_next_step()
+                        st = time.time()
+                        output_image = sess.run(network, options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
+                        st2 = time.time()
+                        print("rough time estimate:", st2 - st)
+                        #pctx.profiler.profile_operations(options=opts)
+                        if train_from_queue or args.mean_estimator:
+                            output_image = output_image[:, :, :, ::-1]
+                        print("output_image swap axis")
+                        loss_val = np.mean((output_image - output_ground) ** 2) * 255.0 * 255.0
+                        print("loss", loss_val)
+                        all_test[i] = loss_val
+                        output_image=np.clip(output_image,0.0,1.0)
+                        print("output_image clipped")
+                        output_image *= 255.0
+                        print("output_image scaled")
+                        cv2.imwrite("%s/%06d.png"%(debug_dir, i+1),np.uint8(output_image[0,:,:,:]))
+                        print("output_image written")
+                        if args.generate_timeline:
+                            fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+                            print("trace fetched")
+                            chrome_trace = fetched_timeline.generate_chrome_trace_format()
+                            print("chrome trace generated")
+                            with open("%s/nn_%d.json"%(debug_dir, i+1), 'w') as f:
+                                f.write(chrome_trace)
+                            print("trace written")
             test_dirname = debug_dir
         else:
             if args.collect_validate_loss:
