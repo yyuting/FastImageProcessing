@@ -11,8 +11,8 @@ import pickle
 from tensorflow.python.client import timeline
 import copy
 from shaders import *
-import sys; sys.path += ['../../global_opt/proj/apps']
-sys.path += ['../../tensorflow-vgg']
+import sys; sys.path += ['/home/yy2bb/global_opt/proj/apps']
+sys.path += ['/home/yy2bb/tensorflow-vgg']
 import vgg16
 #import compiler_problem
 from unet import unet
@@ -53,6 +53,11 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
         IQR = np.load(os.path.join(dataroot, 'IQR.npy'))
         tolerance = 2.0
 
+    if shader_name == 'mandelbulb':
+        geometry = 'none'
+    else:
+        geometry = 'plane'
+
     compiler_problem_full_name = os.path.abspath(os.path.join(name, 'compiler_problem.py'))
     if not os.path.exists(compiler_problem_full_name):
         if shader_name == 'zigzag':
@@ -63,6 +68,12 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             shader_args = ' render_bricks plane none '
         elif shader_name == 'mandelbrot':
             shader_args = ' render_mandelbrot_tile_radius plane none '
+        elif shader_name == 'fire':
+            shader_args = ' render_fire plane spheres '
+        elif shader_name == 'marble':
+            shader_args = ' render_marble plane ripples '
+        elif shader_name == 'mandelbulb':
+            shader_args = ' render_mandelbulb none none'
         render_util_dir = os.path.abspath('../../global_opt/proj/apps')
         render_single_full_name = os.path.abspath(os.path.join(render_util_dir, 'render_single.py'))
         cwd = os.getcwd()
@@ -95,7 +106,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
 
     #samples = [all_features[-2, :, :], all_features[-1, :, :]]
 
-    features, vec_output = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, return_vec_output=True, compiler_module=compiler_module)
+    features, vec_output = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, return_vec_output=True, compiler_module=compiler_module, geometry=geometry)
 
     color_features = vec_output
     with tf.control_dependencies(color_features):
@@ -194,7 +205,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
     #numpy.save('valid_inds.npy', valid_inds)
     #return features
 
-def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None):
+def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None, geometry='plane', zero_samples=False):
     vec_output_len = 3
     assert compiler_module is not None
     #if shader_name == 'zigzag':
@@ -232,6 +243,7 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     tensor_x2 = shader_time * tf.constant(1.0, dtype=dtype, shape=xv.shape)
 
     if samples is None:
+        print("creating random samples")
         sample1 = tf.random_normal(xv.shape, dtype=dtype)
         sample2 = tf.random_normal(xv.shape, dtype=dtype)
     else:
@@ -243,11 +255,16 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
 
     if render_sigma is None:
         render_sigma = [0.5, 0.5, 0.0]
-    vector3 = [tensor_x0 + render_sigma[0] * sample1, tensor_x1 + render_sigma[1] * sample2, tensor_x2]
+    if not zero_samples:
+        print("using random samples")
+        vector3 = [tensor_x0 + render_sigma[0] * sample1, tensor_x1 + render_sigma[1] * sample2, tensor_x2]
+    else:
+        vector3 = [tensor_x0, tensor_x1, tensor_x2]
+        print("using zero samples")
     #vector3 = [tensor_x0, tensor_x1, tensor_x2]
     f_log_intermediate[0] = shader_time
     f_log_intermediate[1] = camera_pos
-    get_shader(vector3, f_log_intermediate, camera_pos, features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output, compiler_module=compiler_module)
+    get_shader(vector3, f_log_intermediate, camera_pos, features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output, compiler_module=compiler_module, geometry=geometry)
 
     f_log_intermediate[features_len-2] = sample1
     f_log_intermediate[features_len-1] = sample2
@@ -257,9 +274,9 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     else:
         return f_log_intermediate
 
-def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zigzag', color_inds=None, vec_output=None, compiler_module=None):
+def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zigzag', color_inds=None, vec_output=None, compiler_module=None, geometry='plane'):
     assert compiler_module is not None
-    features = get_features(x, camera_pos)
+    features = get_features(x, camera_pos, geometry=geometry)
     if vec_output is None:
         vec_output = [None] * 3
     #if shader_name == 'zigzag':
@@ -283,20 +300,20 @@ def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zig
     with tf.control_dependencies(vec_output):
         with tf.variable_scope("auxiliary"):
             h = 1e-4
-            features_neg = get_features([x[0]-h, x[1], x[2]], camera_pos)
-            features_pos = get_features([x[0]+h, x[1], x[2]], camera_pos)
+            features_neg = get_features([x[0]-h, x[1], x[2]], camera_pos, geometry=geometry)
+            features_pos = get_features([x[0]+h, x[1], x[2]], camera_pos, geometry=geometry)
             f_log_intermediate[features_len-7] = (features_pos[1] - features_neg[1]) / (2 * h)
             f_log_intermediate[features_len-6] = (features_pos[2] - features_neg[2]) / (2 * h)
 
-            features_neg = get_features([x[0], x[1]-h, x[2]], camera_pos)
-            features_pos = get_features([x[0], x[1]+h, x[2]], camera_pos)
+            features_neg = get_features([x[0], x[1]-h, x[2]], camera_pos, geometry=geometry)
+            features_pos = get_features([x[0], x[1]+h, x[2]], camera_pos, geometry=geometry)
             f_log_intermediate[features_len-5] = (features_pos[1] - features_neg[1]) / (2 * h)
             f_log_intermediate[features_len-4] = (features_pos[2] - features_neg[2]) / (2 * h)
 
             f_log_intermediate[features_len-3] = f_log_intermediate[features_len-7] * f_log_intermediate[features_len-4] - f_log_intermediate[features_len-6] * f_log_intermediate[features_len-5]
     return
 
-def get_features(x, camera_pos):
+def get_features(x, camera_pos, geometry='plane'):
     ray_dir = [x[0] - width / 2, x[1] + 1, width / 2]
     ray_origin = [camera_pos[0], camera_pos[1], camera_pos[2]]
 
@@ -323,16 +340,63 @@ def get_features(x, camera_pos):
     #t_ray = -ray_origin[2] / (ray_dir_p[2] + 1e-8)
     t_ray = -ray_origin[2] / (ray_dir_p[2])
 
-    features = [None] * 8
-    features[0] = x[2]
-    features[1] = ray_origin[0] + t_ray * ray_dir_p[0]
-    features[2] = ray_origin[1] + t_ray * ray_dir_p[1]
-    features[3] = ray_origin[2] + t_ray * ray_dir_p[2]
-    features[4] = -ray_dir_p[0]
-    features[5] = -ray_dir_p[1]
-    features[6] = -ray_dir_p[2]
-    features[7] = t_ray
+    if geometry == 'plane':
+        features = [None] * 8
+        features[0] = x[2]
+        features[1] = ray_origin[0] + t_ray * ray_dir_p[0]
+        features[2] = ray_origin[1] + t_ray * ray_dir_p[1]
+        features[3] = ray_origin[2] + t_ray * ray_dir_p[2]
+        features[4] = -ray_dir_p[0]
+        features[5] = -ray_dir_p[1]
+        features[6] = -ray_dir_p[2]
+        features[7] = t_ray
+    elif geometry == 'none':
+        features = [None] * 7
+        features[0] = x[2]
+        features[1] = ray_dir_p[0]
+        features[2] = ray_dir_p[1]
+        features[3] = ray_dir_p[2]
+        features[4] = ray_origin[0]
+        features[5] = ray_origin[1]
+        features[6] = ray_origin[2]
     return features
+
+def image_gradients(image):
+  """
+  Copied from https://github.com/tensorflow/tensorflow/blob/r1.8/tensorflow/python/ops/image_ops_impl.py
+  it's a hack only because we're haven't upgraded tensorflow
+  Returns image gradients (dy, dx) for each color channel.
+  Both output tensors have the same shape as the input: [batch_size, h, w,
+  d]. The gradient values are organized so that [I(x+1, y) - I(x, y)] is in
+  location (x, y). That means that dy will always have zeros in the last row,
+  and dx will always have zeros in the last column.
+  Arguments:
+    image: Tensor with shape [batch_size, h, w, d].
+  Returns:
+    Pair of tensors (dy, dx) holding the vertical and horizontal image
+    gradients (1-step finite difference).
+  Raises:
+    ValueError: If `image` is not a 4D tensor.
+  """
+  if image.get_shape().ndims != 4:
+    raise ValueError('image_gradients expects a 4D tensor '
+                     '[batch_size, h, w, d], not %s.', image.get_shape())
+  image_shape = tf.shape(image)
+  batch_size, height, width, depth = tf.unstack(image_shape)
+  dy = image[:, 1:, :, :] - image[:, :-1, :, :]
+  dx = image[:, :, 1:, :] - image[:, :, :-1, :]
+
+  # Return tensors with same size as original image by concatenating
+  # zeros. Place the gradient [I(x+1,y) - I(x,y)] on the base pixel (x, y).
+  shape = tf.stack([batch_size, 1, width, depth])
+  dy = tf.concat([dy, tf.zeros(shape, image.dtype)], 1)
+  dy = tf.reshape(dy, image_shape)
+
+  shape = tf.stack([batch_size, height, 1, depth])
+  dx = tf.concat([dx, tf.zeros(shape, image.dtype)], 2)
+  dx = tf.reshape(dx, image_shape)
+
+  return dy, dx
 
 def lrelu(x):
     return tf.maximum(x*0.2,x)
@@ -476,13 +540,15 @@ def prepare_data_zigzag(task):
         val_names.append(os.path.join(test_input_dir, file))
     return input_names,output_names,val_names,finetune_input_names,finetune_output_names
 
-def prepare_data_root(dataroot, use_weight_map=False):
+def prepare_data_root(dataroot, use_weight_map=False, gradient_loss=False):
     input_names=[]
     output_names=[]
     val_names=[]
     val_img_names=[]
     map_names = []
     val_map_names = []
+    grad_names = []
+    val_grad_names = []
 
     train_input_dir = os.path.join(dataroot, 'train_label')
     test_input_dir = os.path.join(dataroot, 'test_label')
@@ -506,7 +572,15 @@ def prepare_data_root(dataroot, use_weight_map=False):
         for file in sorted(os.listdir(test_map_dir)):
             val_map_names.append(os.path.join(test_map_dir, file))
 
-    return input_names, output_names, val_names, val_img_names, map_names, val_map_names
+    if gradient_loss:
+        train_grad_dir = os.path.join(dataroot, 'train_grad')
+        test_grad_dir = os.path.join(dataroot, 'test_grad')
+        for file in sorted(os.listdir(train_grad_dir)):
+            grad_names.append(os.path.join(train_grad_dir, file))
+        for file in sorted(os.listdir(test_grad_dir)):
+            val_grad_names.append(os.path.join(test_grad_dir, file))
+
+    return input_names, output_names, val_names, val_img_names, map_names, val_map_names, grad_names, val_grad_names
 
 
 os.system('nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp')
@@ -602,6 +676,13 @@ def main():
     parser.add_argument('--render_only', dest='render_only', action='store_true', help='if specified, render using given camera pos, does not calculate loss')
     parser.add_argument('--render_camera_pos', dest='render_camera_pos', default='camera_pos.npy', help='used to render result')
     parser.add_argument('--render_t', dest='render_t', default='render_t.npy', help='used to render output')
+    parser.add_argument('--gradient_loss', dest='gradient_loss', action='store_true', help='if specified, also use gradient at canny edge regions as a loss term')
+    parser.add_argument('--normalize_grad', dest='normalize_grad', action='store_true', help='if specified, use normalized gradient as loss')
+    parser.add_argument('--grayscale_grad', dest='grayscale_grad', action='store_true', help='if specified, use grayscale gradient as loss')
+    parser.add_argument('--cos_sim', dest='cos_sim', action='store_true', help='use cosine similarity to compute gradient loss')
+    parser.add_argument('--gradient_loss_scale', dest='gradient_loss_scale', type=float, default=1.0, help='scale multiplied to gradient loss')
+    parser.add_argument('--gradient_loss_all_pix', dest='gradient_loss_all_pix', action='store_true', help='if specified, use all pixels to calculate gradient loss')
+    parser.add_argument('--gradient_loss_canny_weight', dest='gradient_loss_canny_weight', action='store_true', help='if specified use weight map to calculate gradient loss')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -650,6 +731,12 @@ def main():
     parser.set_defaults(orig_rgb=False)
     parser.set_defaults(perceptual_loss=False)
     parser.set_defaults(use_weight_map=False)
+    parser.set_defaults(gradient_loss=False)
+    parser.set_defaults(normalize_grad=False)
+    parser.set_defaults(grayscale_grad=False)
+    parser.set_defaults(cos_sim=False)
+    parser.set_defaults(gradient_loss_all_pix=False)
+    parser.set_defaults(gradient_loss_canny_weight=False)
 
     args = parser.parse_args()
 
@@ -763,11 +850,12 @@ def main_network(args):
     if args.render_only:
         args.is_train = False
 
-    input_names, output_names, val_names, val_img_names, map_names, val_map_names = prepare_data_root(args.dataroot, use_weight_map=args.use_weight_map)
+    input_names, output_names, val_names, val_img_names, map_names, val_map_names, grad_names, val_grad_names = prepare_data_root(args.dataroot, use_weight_map=args.use_weight_map or args.gradient_loss_canny_weight, gradient_loss=args.gradient_loss)
     if args.test_training:
         val_names = input_names
         val_img_names = output_names
         val_map_names = map_names
+        val_grad_names = grad_names
 
     read_data_from_file = (not args.debug_mode) and (not args.data_from_gpu)
 
@@ -971,12 +1059,50 @@ def main_network(args):
                 alpha = tf.placeholder(tf.float32)
                 alpha_val = 1.0
 
+    weight_map = tf.placeholder(tf.float32,shape=[None,None,None])
+
     if not args.use_weight_map:
         loss=tf.reduce_mean(tf.square(network-output))
     else:
-        weight_map = tf.placeholder(tf.float32,shape=[None,None,None])
         loss_map = tf.reduce_mean(tf.square(network - output), axis=3)
         loss = tf.reduce_mean(loss_map * weight_map)
+
+    loss_l2 = loss
+    loss_add_term = loss
+
+    if args.gradient_loss:
+        canny_edge = tf.placeholder(tf.float32, shape=[None, None, None])
+        if not args.grayscale_grad:
+            dx_ground = tf.placeholder(tf.float32, shape=[None, None, None, 3])
+            dy_ground = tf.placeholder(tf.float32, shape=[None, None, None, 3])
+            dx_network, dy_network = image_gradients(network)
+        else:
+            dx_ground = tf.placeholder(tf.float32, shape=[None, None, None, 1])
+            dy_ground = tf.placeholder(tf.float32, shape=[None, None, None, 1])
+            bgr_weights = [0.0721, 0.7154, 0.2125]
+            network_gray = tf.expand_dims(tf.tensordot(network, bgr_weights, [[-1], [-1]]), axis=3)
+            dx_network, dy_network = image_gradients(network_gray)
+        if args.normalize_grad:
+            grad_norm_network = tf.sqrt(tf.square(dx_network) + tf.square(dy_network) + 1e-8)
+            grad_norm_ground = tf.sqrt(tf.square(dx_ground) + tf.square(dy_ground) + 1e-8)
+            dx_ground /= grad_norm_ground
+            dy_ground /= grad_norm_ground
+            dx_network /= grad_norm_network
+            dy_network /= grad_norm_network
+        if not args.cos_sim:
+            gradient_loss_term = tf.reduce_mean(tf.square(dx_network - dx_ground) + tf.square(dy_network - dy_ground), axis=3)
+        else:
+            gradient_loss_term = -tf.reduce_mean(dx_network * dx_ground + dy_network * dy_ground, axis=3)
+
+        if args.gradient_loss_all_pix:
+            loss_add_term = tf.reduce_mean(gradient_loss_term)
+        elif args.gradient_loss_canny_weight:
+            loss_add_term = tf.reduce_mean(gradient_loss_term * weight_map)
+        else:
+            loss_add_term = tf.reduce_sum(gradient_loss_term * canny_edge) / tf.reduce_sum(canny_edge)
+
+        loss += args.gradient_loss_scale * loss_add_term
+
     if args.perceptual_loss:
         vgg_in = vgg16.Vgg16()
         vgg_in.build(network)
@@ -997,6 +1123,10 @@ def main_network(args):
     tf.summary.scalar('avg_test_all', avg_test_all)
     reg_loss = 0
     tf.summary.scalar('reg_loss', reg_loss)
+    gradient_loss = 0
+    tf.summary.scalar('gradient_loss', gradient_loss)
+    l2_loss = 0
+    tf.summary.scalar('l2_loss', l2_loss)
 
     loss_to_opt = loss + regularizer_loss
 
@@ -1066,24 +1196,27 @@ def main_network(args):
                     #var_all = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
                     #var_gconv1_exclude = [var for var in var_all if not var.name.startswith('g_conv1')]
                     #var_gconv1_only = [var for var in var_all if var.name.startswith('g_conv1')]
-                    var_exclude_first_layer = [var for var in var_all if not var.name.startswith(exclude_prefix)]
-                    orig_saver = tf.train.Saver(var_list=var_exclude_first_layer)
-                    orig_saver.restore(sess, ckpt_orig.model_checkpoint_path)
-                    first_layer_dict = load_obj("%s/first_layer.pkl"%(args.orig_name))
-                    assert len(first_layer_dict) == len(var_first_layer_only)
-                    for var in var_first_layer_only:
-                        orig_val = first_layer_dict[var.name]
-                        if list(orig_val.shape) == var.get_shape().as_list():
-                            sess.run(tf.assign(var, orig_val))
-                        else:
-                            var_shape = var.get_shape().as_list()
-                            assert len(orig_val.shape) == len(var_shape)
-                            assert len(orig_channel) == orig_val.shape[2]
-                            current_init_val = sess.run(var)
-                            for c in range(len(orig_channel)):
-                                for n in range(args.nsamples):
-                                    current_init_val[:, :, orig_channel[c] + n * nfeatures, :] = orig_val[:, :, c, :] / args.nsamples
-                            sess.run(tf.assign(var, current_init_val))
+                    try:
+                        saver.restore(sess, ckpt_orig.model_checkpoint_path)
+                    except:
+                        var_exclude_first_layer = [var for var in var_all if not var.name.startswith(exclude_prefix)]
+                        orig_saver = tf.train.Saver(var_list=var_exclude_first_layer)
+                        orig_saver.restore(sess, ckpt_orig.model_checkpoint_path)
+                        first_layer_dict = load_obj("%s/first_layer.pkl"%(args.orig_name))
+                        assert len(first_layer_dict) == len(var_first_layer_only)
+                        for var in var_first_layer_only:
+                            orig_val = first_layer_dict[var.name]
+                            if list(orig_val.shape) == var.get_shape().as_list():
+                                sess.run(tf.assign(var, orig_val))
+                            else:
+                                var_shape = var.get_shape().as_list()
+                                assert len(orig_val.shape) == len(var_shape)
+                                assert len(orig_channel) == orig_val.shape[2]
+                                current_init_val = sess.run(var)
+                                for c in range(len(orig_channel)):
+                                    for n in range(args.nsamples):
+                                        current_init_val[:, :, orig_channel[c] + n * nfeatures, :] = orig_val[:, :, c, :] / args.nsamples
+                                sess.run(tf.assign(var, current_init_val))
 
     save_frequency = 1
     num_epoch = args.epoch
@@ -1232,8 +1365,17 @@ def main_network(args):
                     if train_from_queue:
                         output_arr = output_arr[..., ::-1]
                     feed_dict[output] = output_arr
-                    if args.use_weight_map:
+                    if args.use_weight_map or args.gradient_loss_canny_weight:
                         feed_dict[weight_map] = np.expand_dims(read_name(map_names[permutation[i]], True), axis=0)
+                    if args.gradient_loss:
+                        grad_arr = read_name(grad_names[permutation[i]], True)
+                        feed_dict[canny_edge] = grad_arr[:, :, :, 0]
+                        if args.grayscale_grad:
+                            feed_dict[dx_ground] = grad_arr[:, :, :, 1:2]
+                            feed_dict[dy_ground] = grad_arr[:, :, :, 2:3]
+                        else:
+                            feed_dict[dx_ground] = grad_arr[:, :, :, 1:4]
+                            feed_dict[dy_ground] = grad_arr[:, :, :, 4:]
                     _,current =sess.run([opt,loss],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
 
                 if args.learn_scale:
@@ -1371,7 +1513,7 @@ def main_network(args):
             #builder = tf.profiler.ProfileOptionBuilder
             #opts = builder(builder.time_and_memory()).order_by('micros').build()
             #with tf.contrib.tfprof.ProfileContext('/tmp/train_dir', trace_steps=[], dump_steps=[]) as pctx:
-            if True:
+            if not args.collect_validate_loss:
                 if args.render_only:
                     for i in range(time_vals.shape[0]):
                         feed_dict = {camera_pos: camera_pos_vals[i, :], shader_time: time_vals[i:i+1]}
@@ -1395,13 +1537,23 @@ def main_network(args):
                         print("output_ground get")
                         camera_val = camera_pos_vals[i, :]
                         feed_dict = {camera_pos: camera_val, shader_time: time_vals[i:i+1]}
-                        if args.use_weight_map:
+                        if args.use_weight_map or args.gradient_loss_canny_weight:
                             feed_dict[weight_map] = np.expand_dims(read_name(val_map_names[i], True), 0)
+                        if args.gradient_loss:
+                            grad_arr = read_name(val_grad_names[i], True)
+                            feed_dict[canny_edge] = grad_arr[:, :, :, 0]
+                            if args.grayscale_grad:
+                                feed_dict[dx_ground] = grad_arr[:, :, :, 1:2]
+                                feed_dict[dy_ground] = grad_arr[:, :, :, 2:3]
+                            else:
+                                feed_dict[dx_ground] = grad_arr[:, :, :, 1:4]
+                                feed_dict[dy_ground] = grad_arr[:, :, :, 4:]
                         print("feed_dict generated")
                         #pctx.trace_next_step()
                         #pctx.dump_next_step()
+                        feed_dict[output] = output_ground
                         st = time.time()
-                        output_image = sess.run(network, options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
+                        output_image, l2_loss_val = sess.run([network, loss_l2], options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
                         st2 = time.time()
                         print("rough time estimate:", st2 - st)
                         #pctx.profiler.profile_operations(options=opts)
@@ -1409,7 +1561,7 @@ def main_network(args):
                             output_image = output_image[:, :, :, ::-1]
                         print("output_image swap axis")
                         loss_val = np.mean((output_image - output_ground) ** 2) * 255.0 * 255.0
-                        print("loss", loss_val)
+                        print("loss", loss_val, l2_loss_val * 255.0 * 255.0)
                         all_test[i] = loss_val
                         output_image=np.clip(output_image,0.0,1.0)
                         print("output_image clipped")
@@ -1426,10 +1578,22 @@ def main_network(args):
                                 f.write(chrome_trace)
                             print("trace written")
             test_dirname = debug_dir
-        else:
+
             if args.collect_validate_loss:
-                assert not args.test_training
+                #assert not args.test_training
                 dirs = sorted(os.listdir(args.name))
+
+                if args.test_training:
+                    camera_pos_vals = np.load(os.path.join(args.dataroot, 'train.npy'))
+                    time_vals = np.load(os.path.join(args.dataroot, 'train_time.npy'))
+                else:
+                    camera_pos_vals = np.concatenate((
+                                        np.load(os.path.join(args.dataroot, 'test_close.npy')),
+                                        np.load(os.path.join(args.dataroot, 'test_far.npy')),
+                                        np.load(os.path.join(args.dataroot, 'test_middle.npy'))
+                                        ), axis=0)
+                    time_vals = np.load(os.path.join(args.dataroot, 'test_time.npy'))
+
                 for dir in dirs:
                     success = False
                     try:
@@ -1449,38 +1613,51 @@ def main_network(args):
 
                     avg_loss = float(open(os.path.join(args.name, dir, 'score.txt')).read())
                     all_test = np.zeros(len(val_names), dtype=float)
+                    all_grad = np.zeros(len(val_names), dtype=float)
                     for ind in range(len(val_names)):
                         if not args.use_queue:
-                            if args.preload:
-                                input_image = eval_images[ind]
-                                output_image = eval_out_images[ind]
-                            else:
-                                input_image = np.expand_dims(read_name(val_names[ind], args.is_npy, args.is_bin), axis=0)
-                                output_image = np.expand_dims(read_name(val_img_names[ind], False, False), axis=0)
-                            if input_image is None:
-                                continue
+                            output_image = np.expand_dims(read_name(val_img_names[ind], False, False), axis=0)
                             st=time.time()
-                            current=sess.run(loss,feed_dict={input:input_image, output: output_image, alpha: alpha_val})
+                            feed_dict = {camera_pos: camera_pos_vals[ind, :], shader_time: time_vals[ind: ind+1], output: output_image}
+                            if args.use_weight_map or args.gradient_loss_canny_weight:
+                                feed_dict[weight_map] = np.expand_dims(read_name(val_map_names[ind], True), 0)
+                            if args.gradient_loss:
+                                grad_arr = read_name(val_grad_names[ind], True)
+                                feed_dict[canny_edge] = grad_arr[:, :, :, 0]
+                                if args.grayscale_grad:
+                                    feed_dict[dx_ground] = grad_arr[:, :, :, 1:2]
+                                    feed_dict[dy_ground] = grad_arr[:, :, :, 2:3]
+                                else:
+                                    feed_dict[dx_ground] = grad_arr[:, :, :, 1:4]
+                                    feed_dict[dy_ground] = grad_arr[:, :, :, 4:]
+                            current, l2_loss_val, gradient_loss_val = sess.run([loss, loss_l2, loss_add_term],feed_dict=feed_dict)
                             print("%.3f"%(time.time()-st))
                         else:
                             st=time.time()
-                            current=sess.run(loss,feed_dict={alpha: alpha_val})
+                            current, l2_loss_val = sess.run([loss, loss_l2],feed_dict={alpha: alpha_val})
                             print("%.3f"%(time.time()-st))
-                        all_test[ind] = current * 255.0 * 255.0
-
-                    avg_test_close = np.mean(all_test[:5])
-                    avg_test_far = np.mean(all_test[5:10])
-                    avg_test_middle = np.mean(all_test[10:])
-                    avg_test_all = np.mean(all_test)
+                        all_test[ind] = l2_loss_val * 255.0 * 255.0
+                        all_grad[ind] = gradient_loss_val * 255.0 * 255.0
 
                     summary = tf.Summary()
                     summary.value.add(tag='avg_loss', simple_value=avg_loss)
-                    summary.value.add(tag='avg_test_close', simple_value=avg_test_close)
-                    summary.value.add(tag='avg_test_far', simple_value=avg_test_far)
-                    summary.value.add(tag='avg_test_middle', simple_value=avg_test_middle)
-                    summary.value.add(tag='avg_test_all', simple_value=avg_test_all)
+                    summary.value.add(tag='gradient_loss', simple_value=np.mean(all_grad))
+                    summary.value.add(tag='l2_loss', simple_value=np.mean(all_test))
+
+                    if not args.test_training:
+                        avg_test_close = np.mean(all_test[:5])
+                        avg_test_far = np.mean(all_test[5:10])
+                        avg_test_middle = np.mean(all_test[10:])
+                        avg_test_all = np.mean(all_test)
+
+                        summary.value.add(tag='avg_test_close', simple_value=avg_test_close)
+                        summary.value.add(tag='avg_test_far', simple_value=avg_test_far)
+                        summary.value.add(tag='avg_test_middle', simple_value=avg_test_middle)
+                        summary.value.add(tag='avg_test_all', simple_value=avg_test_all)
+
                     train_writer.add_summary(summary, epoch)
 
+        else:
             test_dirbase = 'train' if args.test_training else 'test'
             if args.clip_weights > 0:
                 test_dirname = "%s/%s_abs%s"%(args.name, test_dirbase, str(args.clip_weights).replace('.', ''))
