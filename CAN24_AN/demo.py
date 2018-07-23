@@ -1335,6 +1335,19 @@ def main_network(args):
                     run_options = None
                     run_metadata = None
 
+                feed_dict={}
+                if args.use_weight_map or args.gradient_loss_canny_weight:
+                    feed_dict[weight_map] = np.expand_dims(read_name(map_names[permutation[i]], True), axis=0)
+                if args.gradient_loss:
+                    grad_arr = read_name(grad_names[permutation[i]], True)
+                    feed_dict[canny_edge] = grad_arr[:, :, :, 0]
+                    if args.grayscale_grad:
+                        feed_dict[dx_ground] = grad_arr[:, :, :, 1:2]
+                        feed_dict[dy_ground] = grad_arr[:, :, :, 2:3]
+                    else:
+                        feed_dict[dx_ground] = grad_arr[:, :, :, 1:4]
+                        feed_dict[dy_ground] = grad_arr[:, :, :, 4:]
+
                 if (not args.use_queue) and read_data_from_file:
                     if args.preload:
                         if not args.use_batch:
@@ -1352,7 +1365,10 @@ def main_network(args):
                         else:
                             # TODO: should complete this logic
                             raise
-                    _,current=sess.run([opt,loss],feed_dict={input:input_image,output:output_image, alpha: alpha_val}, options=run_options, run_metadata=run_metadata)
+                    feed_dict[input] = input_image
+                    feed_dict[output] = output_image
+                    feed_dict[alpha] = alpha_val
+                    _,current=sess.run([opt,loss],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
                 elif args.use_queue:
                     if not printval:
                         print("first time arriving before sess, wish me best luck")
@@ -1360,22 +1376,12 @@ def main_network(args):
                     _,current=sess.run([opt,loss],feed_dict={alpha: alpha_val}, options=run_options, run_metadata=run_metadata)
                 else:
                     camera_val = camera_pos_vals[permutation[i], :]
-                    feed_dict = {camera_pos: camera_val, shader_time: [time_vals[permutation[i]]]}
+                    feed_dict[camera_pos] = camera_val
+                    feed_dict[shader_time] = [time_vals[permutation[i]]]
                     output_arr = np.expand_dims(read_name(output_names[permutation[i]], False), axis=0)
                     if train_from_queue:
                         output_arr = output_arr[..., ::-1]
                     feed_dict[output] = output_arr
-                    if args.use_weight_map or args.gradient_loss_canny_weight:
-                        feed_dict[weight_map] = np.expand_dims(read_name(map_names[permutation[i]], True), axis=0)
-                    if args.gradient_loss:
-                        grad_arr = read_name(grad_names[permutation[i]], True)
-                        feed_dict[canny_edge] = grad_arr[:, :, :, 0]
-                        if args.grayscale_grad:
-                            feed_dict[dx_ground] = grad_arr[:, :, :, 1:2]
-                            feed_dict[dy_ground] = grad_arr[:, :, :, 2:3]
-                        else:
-                            feed_dict[dx_ground] = grad_arr[:, :, :, 1:4]
-                            feed_dict[dy_ground] = grad_arr[:, :, :, 4:]
                     _,current =sess.run([opt,loss],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
 
                 if args.learn_scale:
@@ -1770,7 +1776,18 @@ def main_network(args):
                 if args.clip_weights_percentage_after_normalize > 0:
                     feed_dict[replace_normalize_weights] = True
                     feed_dict[normalize_weights] = weights_val
-                output_image, current=sess.run([network, loss],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
+                if args.use_weight_map or args.gradient_loss_canny_weight:
+                    feed_dict[weight_map] = np.expand_dims(read_name(val_map_names[ind], True), 0)
+                if args.gradient_loss:
+                    grad_arr = read_name(val_grad_names[ind], True)
+                    feed_dict[canny_edge] = grad_arr[:, :, :, 0]
+                    if args.grayscale_grad:
+                        feed_dict[dx_ground] = grad_arr[:, :, :, 1:2]
+                        feed_dict[dy_ground] = grad_arr[:, :, :, 2:3]
+                    else:
+                        feed_dict[dx_ground] = grad_arr[:, :, :, 1:4]
+                        feed_dict[dy_ground] = grad_arr[:, :, :, 4:]
+                output_image, current=sess.run([network, loss_l2],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
                 print("%.3f"%(time.time()-st))
                 all_test[ind] = current * 255.0 * 255.0
                 output_image=np.minimum(np.maximum(output_image,0.0),1.0)*255.0
