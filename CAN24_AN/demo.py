@@ -152,7 +152,11 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                     feature_scale[ind] = 1.0
 
             if output_type == 'remove_constant':
-                features = tf.parallel_stack([features[k] for k in valid_inds])
+                #if shader_name == 'mandelbulb':
+                if False
+                    features = tf.parallel_stack([features[k] for k in valid_inds[-1000:]])
+                else:
+                    features = tf.parallel_stack([features[k] for k in valid_inds])
                 features = tf.transpose(features, [1, 2, 3, 0])
                 if False:
                     valid_features = [features[k] for k in valid_inds]
@@ -172,8 +176,13 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                 raise
 
             if (output_type not in ['rgb', 'bgr']) and not learn_scale:
-                features += feature_bias
-                features *= feature_scale
+                #if shader_name == 'mandelbulb':
+                if False:
+                    features += feature_bias[-1000:]
+                    features *= feature_scale[-1000:]
+                else:
+                    features += feature_bias
+                    features *= feature_scale
             elif learn_scale:
                 old_features = features
                 features = tf.where(tf.is_finite(old_features), features, tf.zeros_like(features))
@@ -356,9 +365,9 @@ def get_features(x, camera_pos, geometry='plane'):
         features[1] = ray_dir_p[0]
         features[2] = ray_dir_p[1]
         features[3] = ray_dir_p[2]
-        features[4] = ray_origin[0]
-        features[5] = ray_origin[1]
-        features[6] = ray_origin[2]
+        features[4] = ray_origin[0] * tf.constant(1.0, dtype=dtype, shape=x[0].shape)
+        features[5] = ray_origin[1] * tf.constant(1.0, dtype=dtype, shape=x[0].shape)
+        features[6] = ray_origin[2] * tf.constant(1.0, dtype=dtype, shape=x[0].shape)
     return features
 
 def image_gradients(image):
@@ -683,6 +692,8 @@ def main():
     parser.add_argument('--gradient_loss_scale', dest='gradient_loss_scale', type=float, default=1.0, help='scale multiplied to gradient loss')
     parser.add_argument('--gradient_loss_all_pix', dest='gradient_loss_all_pix', action='store_true', help='if specified, use all pixels to calculate gradient loss')
     parser.add_argument('--gradient_loss_canny_weight', dest='gradient_loss_canny_weight', action='store_true', help='if specified use weight map to calculate gradient loss')
+    parser.add_argument('--train_res', dest='train_res', action='store_true', help='if specified, out_img = in_noisy_img + out_network')
+    parser.add_argument('--two_stage_training', dest='two_stage_training', action='store_true', help='if specified, train first half epochs using RGB loss and next half epoch using RGB + gradient loss')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -737,6 +748,8 @@ def main():
     parser.set_defaults(cos_sim=False)
     parser.set_defaults(gradient_loss_all_pix=False)
     parser.set_defaults(gradient_loss_canny_weight=False)
+    parser.set_defaults(train_res=False)
+    parser.set_defaults(two_stage_training=False)
 
     args = parser.parse_args()
 
@@ -1061,10 +1074,17 @@ def main_network(args):
 
     weight_map = tf.placeholder(tf.float32,shape=[None,None,None])
 
-    if not args.use_weight_map:
-        loss=tf.reduce_mean(tf.square(network-output))
+    if not args.train_res:
+        diff = network - output
     else:
-        loss_map = tf.reduce_mean(tf.square(network - output), axis=3)
+        input_color = tf.stack([debug_input[:, :, :, ind] for ind in color_inds], axis=3)
+        diff = network + input_color - output
+        network += input_color
+
+    if not args.use_weight_map:
+        loss=tf.reduce_mean(tf.square(diff))
+    else:
+        loss_map = tf.reduce_mean(tf.square(diff), axis=3)
         loss = tf.reduce_mean(loss_map * weight_map)
 
     loss_l2 = loss
@@ -1136,8 +1156,12 @@ def main_network(args):
         if args.update_bn:
             with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
                 opt=adam_optimizer.minimize(loss_to_opt,var_list=var_list)
+                if args.two_stage_training:
+                    opt_before = adam_optimizer.minimize(loss_l2, var_list=var_list)
         else:
             opt=adam_optimizer.minimize(loss_to_opt,var_list=var_list)
+            if args.two_stage_training:
+                opt_before = adam_optimizer.minimize(loss_l2, var_list=var_list)
         saver=tf.train.Saver(tf.trainable_variables(), max_to_keep=1000)
 
     print("start sess")
@@ -1304,7 +1328,17 @@ def main_network(args):
 
         min_avg_loss = 1e20
 
+        if args.two_stage_training:
+            opt_old = opt
+            opt = opt_before
+            loss_old = loss
+            loss = loss_l2
+
         for epoch in range(1, num_epoch+1):
+
+            if args.two_stage_training and epoch > num_epoch // 2:
+                opt = opt_old
+                loss = loss_old
 
             if read_from_epoch:
                 if epoch <= args.which_epoch:
@@ -1401,8 +1435,9 @@ def main_network(args):
 
             avg_loss = np.mean(all[np.where(all)])
 
-            if min_avg_loss > avg_loss:
-                min_avg_loss = avg_loss
+            if not (args.two_stage_training and epoch <= num_epoch // 2):
+                if min_avg_loss > avg_loss:
+                    min_avg_loss = avg_loss
 
             summary = tf.Summary()
             summary.value.add(tag='avg_loss', simple_value=avg_loss)
@@ -1538,6 +1573,8 @@ def main_network(args):
                     return
                 else:
                     all_test = np.zeros(len(val_img_names), dtype=float)
+                    all_grad = np.zeros(len(val_img_names), dtype=float)
+                    all_l2 = np.zeros(len(val_img_names), dtype=float)
                     for i in range(len(val_img_names)):
                         output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
                         print("output_ground get")
@@ -1559,7 +1596,7 @@ def main_network(args):
                         #pctx.dump_next_step()
                         feed_dict[output] = output_ground
                         st = time.time()
-                        output_image, l2_loss_val = sess.run([network, loss_l2], options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
+                        output_image, l2_loss_val, grad_loss_val = sess.run([network, loss_l2, loss_add_term], options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
                         st2 = time.time()
                         print("rough time estimate:", st2 - st)
                         #pctx.profiler.profile_operations(options=opts)
@@ -1569,6 +1606,8 @@ def main_network(args):
                         loss_val = np.mean((output_image - output_ground) ** 2) * 255.0 * 255.0
                         print("loss", loss_val, l2_loss_val * 255.0 * 255.0)
                         all_test[i] = loss_val
+                        all_l2[i] = l2_loss_val
+                        all_grad[i] = grad_loss_val
                         output_image=np.clip(output_image,0.0,1.0)
                         print("output_image clipped")
                         output_image *= 255.0
@@ -1583,6 +1622,7 @@ def main_network(args):
                             with open("%s/nn_%d.json"%(debug_dir, i+1), 'w') as f:
                                 f.write(chrome_trace)
                             print("trace written")
+                    open("%s/all_loss.txt"%debug_dir, 'w').write("%f, %f"%(np.mean(all_l2), np.mean(all_grad)))
             test_dirname = debug_dir
 
             if args.collect_validate_loss:
