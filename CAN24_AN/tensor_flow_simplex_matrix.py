@@ -3,6 +3,7 @@
 from __future__ import division, print_function, unicode_literals
 import tensorflow as tf
 import numpy as np
+import numpy
 from time import time
 from tf_get_simplex_vertices import get_simplex_vertices
 from tf_map_gradient import map_gradients
@@ -61,7 +62,7 @@ def noise3d(input_vectors, perm, grad3, vertex_table, length):
     offsets_1 = offsets_0 - simplex_vertices[:, 0, :] + 1.0 / 6.0
     offsets_2 = offsets_0 - simplex_vertices[:, 1, :] + 1.0 / 3.0
     offsets_3 = offsets_0 - 0.5
-    masked_skewed_vectors = tf.to_int32(skewed_vectors) % 256
+    masked_skewed_vectors = tf.cast(tf.floor(skewed_vectors), tf.int32) % 256
     gi0s = tf.gather_nd(
         perm,
         tf.expand_dims(masked_skewed_vectors[:, 0], 1) +
@@ -75,28 +76,28 @@ def noise3d(input_vectors, perm, grad3, vertex_table, length):
     gi1s = tf.gather_nd(
         perm,
         tf.expand_dims(masked_skewed_vectors[:, 0], 1) +
-        tf.expand_dims(tf.to_int32(simplex_vertices[:, 0, 0]), 1) +
+        tf.expand_dims(tf.cast(tf.floor(simplex_vertices[:, 0, 0]), tf.int32), 1) +
         tf.expand_dims(tf.gather_nd(
             perm,
             tf.expand_dims(masked_skewed_vectors[:, 1], 1) +
-            tf.expand_dims(tf.to_int32(simplex_vertices[:, 0, 1]), 1) +
+            tf.expand_dims(tf.cast(tf.floor(simplex_vertices[:, 0, 1]), tf.int32), 1) +
             tf.expand_dims(tf.gather_nd(
                 perm,
                 tf.expand_dims(masked_skewed_vectors[:, 2], 1) +
-                tf.expand_dims(tf.to_int32(simplex_vertices[:, 0, 2]), 1)), 1)), 1)
+                tf.expand_dims(tf.cast(tf.floor(simplex_vertices[:, 0, 2]), tf.int32), 1)), 1)), 1)
     ) % 12
     gi2s = tf.gather_nd(
         perm,
         tf.expand_dims(masked_skewed_vectors[:, 0], 1) +
-        tf.expand_dims(tf.to_int32(simplex_vertices[:, 1, 0]), 1) +
+        tf.expand_dims(tf.cast(tf.floor(simplex_vertices[:, 1, 0]), tf.int32), 1) +
         tf.expand_dims(tf.gather_nd(
             perm,
             tf.expand_dims(masked_skewed_vectors[:, 1], 1) +
-            tf.expand_dims(tf.to_int32(simplex_vertices[:, 1, 1]), 1) +
+            tf.expand_dims(tf.cast(tf.floor(simplex_vertices[:, 1, 1]), tf.int32), 1) +
             tf.expand_dims(tf.gather_nd(
                 perm,
                 tf.expand_dims(masked_skewed_vectors[:, 2], 1) +
-                tf.expand_dims(tf.to_int32(simplex_vertices[:, 1, 2]), 1)), 1)), 1)
+                tf.expand_dims(tf.cast(tf.floor(simplex_vertices[:, 1, 2]), tf.int32), 1)), 1)), 1)
     ) % 12
     gi3s = tf.gather_nd(
         perm,
@@ -151,3 +152,15 @@ def simplex_noise_2arg(x, y):
     reshaped_noise /= tf.cast(tf.pow(2.0, tf.linspace(0.0, (phases - 1), int(phases))), tf.float32)
     noise_sum = tf.reduce_sum(reshaped_noise, 3)
     return 4.0 * noise_sum
+
+if __name__ == "__main__":
+    xv, yv = numpy.meshgrid(numpy.arange(120), numpy.arange(80), indexing='ij')
+    xv = np.transpose(xv)
+    yv = np.transpose(yv)
+    xv = np.expand_dims(xv, 0)
+    yv = np.expand_dims(yv, 0)
+    xv = np.repeat(xv, 1, axis=0)
+    yv = np.repeat(yv, 1, axis=0)
+    tensor_x0 = tf.constant(xv, dtype=tf.float32)
+    tensor_x1 = tf.constant(yv, dtype=tf.float32)
+    simplex_noise_2arg(tensor_x0, tensor_x1)

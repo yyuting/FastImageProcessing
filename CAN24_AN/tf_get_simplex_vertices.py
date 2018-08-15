@@ -23,9 +23,9 @@ np_vertex_table = np.array([
 
 
 def get_simplex_vertices(offsets, vertex_table, length):
-    vertex_table_x_index = tf.to_int32(offsets[:, 0] >= offsets[:, 1])
-    vertex_table_y_index = tf.to_int32(offsets[:, 1] >= offsets[:, 2])
-    vertex_table_z_index = tf.to_int32(offsets[:, 0] >= offsets[:, 2])
+    vertex_table_x_index = tf.cast(offsets[:, 0] >= offsets[:, 1], tf.int32)
+    vertex_table_y_index = tf.cast(offsets[:, 1] >= offsets[:, 2], tf.int32)
+    vertex_table_z_index = tf.cast(offsets[:, 0] >= offsets[:, 2], tf.int32)
     index_list = tf.concat([
         tf.reshape(tf.tile(tf.concat([
             tf.expand_dims(vertex_table_x_index, 1),
@@ -45,4 +45,4 @@ if __name__ == "__main__":
     init = tf.initialize_all_variables()
     sess = tf.Session()
     sess.run(init)
-    print(sess.run(tf.to_int32(verts[:, 0, 1])))
+    print(sess.run(tf.cast(tf.floor(verts[:, 0, 1]), tf.int32)))

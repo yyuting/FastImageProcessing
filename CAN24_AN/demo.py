@@ -37,7 +37,7 @@ identity_output_layer = True
 
 less_aggresive_ini = False
 
-def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[]):
+def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True):
     # 2x_1sample on margo
     #camera_pos = np.load('/localtmp/yuting/out_2x1_manual_carft/train.npy')[0, :]
 
@@ -74,11 +74,17 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             shader_args = ' render_marble plane ripples '
         elif shader_name == 'mandelbulb':
             shader_args = ' render_mandelbulb none none'
+        elif shader_name == 'wood':
+            shader_args = ' render_wood_real plane none'
         render_util_dir = os.path.abspath('../../global_opt/proj/apps')
         render_single_full_name = os.path.abspath(os.path.join(render_util_dir, 'render_single.py'))
         cwd = os.getcwd()
         os.chdir(render_util_dir)
-        ans = os.system('cd ' + render_util_dir + ' && source activate py36 && python ' + render_single_full_name + ' ' + os.path.join(cwd, name) + shader_args + ' --is-tf --code-only --log-intermediates && source activate tensorflow35 && cd ' + cwd)
+        render_single_cmd = 'python ' + render_single_full_name + ' ' + os.path.join(cwd, name) + shader_args + ' --is-tf --code-only --log-intermediates'
+        if not intersection:
+            render_single_cmd = render_single_cmd + ' --log_intermediates_level 1'
+        entire_cmd = 'cd ' + render_util_dir + ' && source activate py36 && ' + render_single_cmd + ' && source activate tensorflow35 && cd ' + cwd
+        ans = os.system(entire_cmd)
         #ans = subprocess.call('cd ' + render_util_dir + ' && source activate py36 && python ' + render_single_full_name + ' out ' + shader_args + ' --is-tf --code-only --log-intermediates && source activate tensorflow35 && cd ' + cwd)
 
         print(ans)
@@ -153,7 +159,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
 
             if output_type == 'remove_constant':
                 #if shader_name == 'mandelbulb':
-                if False
+                if False:
                     features = tf.parallel_stack([features[k] for k in valid_inds[-1000:]])
                 else:
                     features = tf.parallel_stack([features[k] for k in valid_inds])
@@ -214,7 +220,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
     #numpy.save('valid_inds.npy', valid_inds)
     #return features
 
-def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None, geometry='plane', zero_samples=False):
+def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None, geometry='plane', zero_samples=False, debug=[], extra_args=[None]):
     vec_output_len = 3
     assert compiler_module is not None
     #if shader_name == 'zigzag':
@@ -273,7 +279,7 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     #vector3 = [tensor_x0, tensor_x1, tensor_x2]
     f_log_intermediate[0] = shader_time
     f_log_intermediate[1] = camera_pos
-    get_shader(vector3, f_log_intermediate, camera_pos, features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output, compiler_module=compiler_module, geometry=geometry)
+    get_shader(vector3, f_log_intermediate, camera_pos, features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output, compiler_module=compiler_module, geometry=geometry, debug=debug, extra_args=extra_args)
 
     f_log_intermediate[features_len-2] = sample1
     f_log_intermediate[features_len-1] = sample2
@@ -283,9 +289,9 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     else:
         return f_log_intermediate
 
-def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zigzag', color_inds=None, vec_output=None, compiler_module=None, geometry='plane'):
+def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zigzag', color_inds=None, vec_output=None, compiler_module=None, geometry='plane', debug=[], extra_args=[None]):
     assert compiler_module is not None
-    features = get_features(x, camera_pos, geometry=geometry)
+    features = get_features(x, camera_pos, geometry=geometry, debug=debug, extra_args=extra_args)
     if vec_output is None:
         vec_output = [None] * 3
     #if shader_name == 'zigzag':
@@ -322,7 +328,7 @@ def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zig
             f_log_intermediate[features_len-3] = f_log_intermediate[features_len-7] * f_log_intermediate[features_len-4] - f_log_intermediate[features_len-6] * f_log_intermediate[features_len-5]
     return
 
-def get_features(x, camera_pos, geometry='plane'):
+def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None]):
     ray_dir = [x[0] - width / 2, x[1] + 1, width / 2]
     ray_origin = [camera_pos[0], camera_pos[1], camera_pos[2]]
 
@@ -331,12 +337,12 @@ def get_features(x, camera_pos, geometry='plane'):
     ray_dir[1] /= ray_dir_norm
     ray_dir[2] /= ray_dir_norm
 
-    sin1 = tf.sin(camera_pos[3]);
-    cos1 = tf.cos(camera_pos[3]);
-    sin2 = tf.sin(camera_pos[4]);
-    cos2 = tf.cos(camera_pos[4]);
-    sin3 = tf.sin(camera_pos[5]);
-    cos3 = tf.cos(camera_pos[5]);
+    sin1 = tf.sin(camera_pos[3])
+    cos1 = tf.cos(camera_pos[3])
+    sin2 = tf.sin(camera_pos[4])
+    cos2 = tf.cos(camera_pos[4])
+    sin3 = tf.sin(camera_pos[5])
+    cos3 = tf.cos(camera_pos[5])
 
     ray_dir_p = [cos2 * cos3 * ray_dir[0] + (-cos1 * sin3 + sin1 * sin2 * cos3) * ray_dir[1] + (sin1 * sin3 + cos1 * sin2 * cos3) * ray_dir[2],
                  cos2 * sin3 * ray_dir[0] + (cos1 * cos3 + sin1 * sin2 * sin3) * ray_dir[1] + (-sin1 * cos3 + cos1 * sin2 * sin3) * ray_dir[2],
@@ -344,13 +350,66 @@ def get_features(x, camera_pos, geometry='plane'):
 
     N = [0, 0, 1.0]
 
-    light_dir = [0.22808577638091165, 0.60822873701576452, 0.76028592126970562]
+    if geometry == 'hyperboloid1':
+        features = [None] * 19
+        hyperboloid_center = numpy.zeros(3)
+        hyperboloid_radius = 30.0
+        hyperboloid_radius2 = hyperboloid_radius ** 2.0
+        quadric = numpy.array([1.0, 0.0, -1.0,
+                               0.0, 0.0, 0.0,
+                               -2.0 * hyperboloid_center[0],
+                               hyperboloid_radius2,
+                               2.0 * hyperboloid_center[2],
+                               hyperboloid_center[0] * hyperboloid_center[0] - hyperboloid_center[2] * hyperboloid_center[2] - hyperboloid_center[1] * hyperboloid_radius2])
+        t_ray = solve_quadric(quadric, ray_origin, ray_dir_p, features, debug=debug)
+        extra_args[0] = t_ray
+        feature_scale = 10.0
+        features[0] = x[2]
+        features[8] = (features[1] - hyperboloid_center[0]) / feature_scale
+        features[9] = (features[3] - hyperboloid_center[2]) / feature_scale
 
-    #t_ray = -ray_origin[2] / (ray_dir_p[2] + 1e-8)
-    t_ray = -ray_origin[2] / (ray_dir_p[2])
+        features[13] = 1.0
+        features[14] = -2.0 * feature_scale * features[8] / (hyperboloid_radius2)
+        #features[14] = 0.0
+        features[15] = 0.0
+        features[16] = 0.0
+        features[17] = 2.0 * feature_scale * features[9] / (hyperboloid_radius2)
+        #features[17] = 0.0
+        features[18] = 1.0
+    elif geometry == 'sphere':
+        features = [None] * 19
+        sphere_center = numpy.zeros(3)
+        sphere_radius = 175.0
+        quadric = numpy.array([1.0, 1.0, 1.0,
+                               0.0, 0.0, 0.0,
+                               -2.0 * sphere_center[0],
+                               -2.0 * sphere_center[1],
+                               -2.0 * sphere_center[2],
+                               sphere_center[0] * sphere_center[0] + sphere_center[1] * sphere_center[1] + sphere_center[2] * sphere_center[2] - sphere_radius * sphere_radius])
+        solve_quadric(quadric, ray_origin, ray_dir_p, features)
+        feature_scale = 320.0 / numpy.pi
+        features[0] = x[2]
+        u = tf.atan2(features[10], features[12])
+        v = tf.acos(features[11])
+        features[8] = u * feature_scale
+        features[9] = v * feature_scale
 
-    if geometry == 'plane':
+        sin_u = tf.sin(u)
+        cos_u = tf.cos(u)
+        sin_v = tf.sin(v)
+        cos_v = tf.cos(v)
+
+        features[13] = cos_u
+        features[14] = 0.0
+        features[15] = -sin_u
+
+        features[16] = -sin_u * cos_v
+        features[17] = sin_v
+        features[18] = -cos_u * cos_v
+
+    elif geometry == 'plane':
         features = [None] * 8
+        t_ray = -ray_origin[2] / (ray_dir_p[2])
         features[0] = x[2]
         features[1] = ray_origin[0] + t_ray * ray_dir_p[0]
         features[2] = ray_origin[1] + t_ray * ray_dir_p[1]
@@ -369,6 +428,81 @@ def get_features(x, camera_pos, geometry='plane'):
         features[5] = ray_origin[1] * tf.constant(1.0, dtype=dtype, shape=x[0].shape)
         features[6] = ray_origin[2] * tf.constant(1.0, dtype=dtype, shape=x[0].shape)
     return features
+
+def solve_quadric(quadric, ray_origin, ray_dir_p, features, debug=[]):
+    Aq = quadric[0] * tf.square(ray_dir_p[0]) + \
+         quadric[1] * tf.square(ray_dir_p[1]) + \
+         quadric[2] * tf.square(ray_dir_p[2]) + \
+         quadric[3] * ray_dir_p[0] * ray_dir_p[1] + \
+         quadric[4] * ray_dir_p[0] * ray_dir_p[2] + \
+         quadric[5] * ray_dir_p[1] * ray_dir_p[2]
+
+    Bq = 2.0 * (quadric[0] * ray_origin[0] * ray_dir_p[0] + \
+                quadric[1] * ray_origin[1] * ray_dir_p[1] + \
+                quadric[2] * ray_origin[2] * ray_dir_p[2]) + \
+         quadric[3] * (ray_origin[0] * ray_dir_p[1] + ray_origin[1] * ray_dir_p[0]) + \
+         quadric[4] * (ray_origin[0] * ray_dir_p[2] + ray_origin[2] * ray_dir_p[0]) + \
+         quadric[5] * (ray_origin[1] * ray_dir_p[2] + ray_origin[2] * ray_dir_p[1]) + \
+         quadric[6] * ray_dir_p[0] + \
+         quadric[7] * ray_dir_p[1] + \
+         quadric[8] * ray_dir_p[2];
+
+    Cq = quadric[0] * tf.square(ray_origin[0]) + \
+         quadric[1] * tf.square(ray_origin[1]) +\
+         quadric[2] * tf.square(ray_origin[2]) + \
+         quadric[3] * ray_origin[0] * ray_origin[1] + \
+         quadric[4] * ray_origin[0] * ray_origin[2] + \
+         quadric[5] * ray_origin[1] * ray_origin[2] + \
+         quadric[6] * ray_origin[0] + \
+         quadric[7] * ray_origin[1] + \
+         quadric[8] * ray_origin[2] + \
+         quadric[9]
+
+    root2 = Bq * Bq - 4.0 * Aq * Cq
+
+    cond_reg = tf.abs(Aq) <= 1e-4
+
+    sqrt_root2 = tf.sqrt(root2)
+    t0 = (-Bq - sqrt_root2) / (2.0 * Aq)
+    t1 = (-Bq + sqrt_root2) / (2.0 * Aq)
+
+    t_ray = tf.where(cond_reg, -Cq / Bq,
+                               tf.where(Aq > 0, tf.where(t0 >= 0, t0, t1),
+                                                tf.where(t1 >= 0, t1, t0)))
+    #t_ray = -Cq / Bq
+
+    root2 = tf.where(t_ray > 0.0, root2, -1.0 * tf.ones_like(root2))
+
+    #intersect_pos = ray_origin + t_ray * ray_dir_p
+    intersect_pos = [None] * 3
+    for i in range(3):
+        intersect_pos[i] = ray_origin[i] + t_ray * ray_dir_p[i]
+
+    normal = [None] * 3
+
+    normal[0] = quadric[6] + 2.0 * quadric[0] * intersect_pos[0] + \
+                quadric[3] * intersect_pos[1] + quadric[4] * intersect_pos[2]
+    normal[1] = quadric[7] + 2.0 * quadric[1] * intersect_pos[1] + \
+                quadric[3] * intersect_pos[0] + quadric[5] * intersect_pos[2]
+    normal[2] = quadric[8] + 2.0 * quadric[2] * intersect_pos[2] + \
+                quadric[4] * intersect_pos[0] + quadric[5] * intersect_pos[1]
+    normal_len = tf.sqrt(normal[0] ** 2.0 + normal[1] ** 2.0 + normal[2] ** 2.0)
+    normal_dot_ray_dir_p = normal[0] * ray_dir_p[0] + normal[1] * ray_dir_p[1] + normal[2] * ray_dir_p[2]
+
+    actual_normal = [None] * 3
+    for i in range(3):
+        normal[i] /= normal_len
+        actual_normal[i] = tf.where(normal_dot_ray_dir_p > 0.0, -normal[i], normal[i])
+        #actual_normal[i] = normal[i]
+
+    features[1:4] = intersect_pos[:]
+    #features[4:7] = -ray_dir_p[:]
+    for i in range(3):
+        features[4+i] = -ray_dir_p[i]
+    features[7] = root2
+    features[10:13] = actual_normal[:]
+    return t_ray
+
 
 def image_gradients(image):
   """
@@ -694,6 +828,8 @@ def main():
     parser.add_argument('--gradient_loss_canny_weight', dest='gradient_loss_canny_weight', action='store_true', help='if specified use weight map to calculate gradient loss')
     parser.add_argument('--train_res', dest='train_res', action='store_true', help='if specified, out_img = in_noisy_img + out_network')
     parser.add_argument('--two_stage_training', dest='two_stage_training', action='store_true', help='if specified, train first half epochs using RGB loss and next half epoch using RGB + gradient loss')
+    parser.add_argument('--no_intersection', dest='intersection', action='store_false', help='if specified, do not include geometry intersection computation in intermediate variables')
+    parser.add_argument('--multi_stage_new_minimizer', dest='new_minimizer', action='store_true', help='if specified, use a new minimizer if multiple stages exist')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -750,6 +886,8 @@ def main():
     parser.set_defaults(gradient_loss_canny_weight=False)
     parser.set_defaults(train_res=False)
     parser.set_defaults(two_stage_training=False)
+    parser.set_defaults(intersection=True)
+    parser.set_defaults(new_minimizer=False)
 
     args = parser.parse_args()
 
@@ -925,6 +1063,8 @@ def main_network(args):
             else:
                 raise
         input_to_network = input
+        if args.input_nc == 3:
+            color_inds = [0, 1, 2]
     else:
         output=tf.placeholder(tf.float32,shape=[None,None,None,3])
         camera_pos = tf.placeholder(dtype, shape=6)
@@ -950,7 +1090,7 @@ def main_network(args):
             print("sample count", shader_samples)
             feature_w = []
             color_inds = []
-            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds)
+            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection)
             color_inds = color_inds[::-1]
             debug_input = input_to_network
 
@@ -1153,15 +1293,19 @@ def main_network(args):
     if not (args.debug_mode and args.mean_estimator):
         adam_optimizer = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
         var_list = tf.trainable_variables()
+        if args.two_stage_training and args.new_minimizer:
+            adam_before = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
+        else:
+            adam_before = adam_optimizer
         if args.update_bn:
             with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
                 opt=adam_optimizer.minimize(loss_to_opt,var_list=var_list)
                 if args.two_stage_training:
-                    opt_before = adam_optimizer.minimize(loss_l2, var_list=var_list)
+                    opt_before = adam_before.minimize(loss_l2, var_list=var_list)
         else:
             opt=adam_optimizer.minimize(loss_to_opt,var_list=var_list)
             if args.two_stage_training:
-                opt_before = adam_optimizer.minimize(loss_l2, var_list=var_list)
+                opt_before = adam_before.minimize(loss_l2, var_list=var_list)
         saver=tf.train.Saver(tf.trainable_variables(), max_to_keep=1000)
 
     print("start sess")
@@ -1250,11 +1394,14 @@ def main_network(args):
         camera_pos_vals = np.load(os.path.join(args.dataroot, 'train.npy'))
         time_vals = np.load(os.path.join(args.dataroot, 'train_time.npy'))
     else:
-        camera_pos_vals = np.concatenate((
-                            np.load(os.path.join(args.dataroot, 'test_close.npy')),
-                            np.load(os.path.join(args.dataroot, 'test_far.npy')),
-                            np.load(os.path.join(args.dataroot, 'test_middle.npy'))
-                            ), axis=0)
+        if args.shader_name != 'mandelbulb':
+            camera_pos_vals = np.concatenate((
+                                np.load(os.path.join(args.dataroot, 'test_close.npy')),
+                                np.load(os.path.join(args.dataroot, 'test_far.npy')),
+                                np.load(os.path.join(args.dataroot, 'test_middle.npy'))
+                                ), axis=0)
+        else:
+            camera_pos_vals = np.load(os.path.join(args.dataroot, 'test.npy'))
         time_vals = np.load(os.path.join(args.dataroot, 'test_time.npy'))
 
     def read_ind(img_arr, name_arr, id, is_npy):
@@ -1508,11 +1655,14 @@ def main_network(args):
                 camera_pos_vals = np.load(os.path.join(args.dataroot, 'train.npy'))
                 time_vals = np.load(os.path.join(args.dataroot, 'train_time.npy'))
             else:
-                camera_pos_vals = np.concatenate((
-                                    np.load(os.path.join(args.dataroot, 'test_close.npy')),
-                                    np.load(os.path.join(args.dataroot, 'test_far.npy')),
-                                    np.load(os.path.join(args.dataroot, 'test_middle.npy'))
-                                    ), axis=0)
+                if args.shader_name != 'mandelbulb':
+                    camera_pos_vals = np.concatenate((
+                                        np.load(os.path.join(args.dataroot, 'test_close.npy')),
+                                        np.load(os.path.join(args.dataroot, 'test_far.npy')),
+                                        np.load(os.path.join(args.dataroot, 'test_middle.npy'))
+                                        ), axis=0)
+                else:
+                    camera_pos_vals = np.load(os.path.join(args.dataroot, 'test.npy'))
                 time_vals = np.load(os.path.join(args.dataroot, 'test_time.npy'))
 
             if args.render_only:
