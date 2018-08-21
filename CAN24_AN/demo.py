@@ -37,7 +37,7 @@ identity_output_layer = True
 
 less_aggresive_ini = False
 
-def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True):
+def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True):
     # 2x_1sample on margo
     #camera_pos = np.load('/localtmp/yuting/out_2x1_manual_carft/train.npy')[0, :]
 
@@ -53,34 +53,29 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
         IQR = np.load(os.path.join(dataroot, 'IQR.npy'))
         tolerance = 2.0
 
-    if shader_name == 'mandelbulb':
-        geometry = 'none'
-    else:
-        geometry = 'plane'
-
     compiler_problem_full_name = os.path.abspath(os.path.join(name, 'compiler_problem.py'))
     if not os.path.exists(compiler_problem_full_name):
         if shader_name == 'zigzag':
-            shader_args = ' render_zigzag plane spheres '
+            shader_args = ' render_zigzag ' + geometry + ' spheres '
         elif shader_name == 'sin_quadratic':
-            shader_args = ' render_sin_quadratic plane ripples '
+            shader_args = ' render_sin_quadratic ' + geometry + ' ripples '
         elif shader_name == 'bricks':
-            shader_args = ' render_bricks plane none '
+            shader_args = ' render_bricks ' + geometry + ' none '
         elif shader_name == 'mandelbrot':
-            shader_args = ' render_mandelbrot_tile_radius plane none '
+            shader_args = ' render_mandelbrot_tile_radius ' + geometry + ' none '
         elif shader_name == 'fire':
-            shader_args = ' render_fire plane spheres '
+            shader_args = ' render_fire ' + geometry + ' spheres '
         elif shader_name == 'marble':
-            shader_args = ' render_marble plane ripples '
+            shader_args = ' render_marble ' + geometry + ' ripples '
         elif shader_name == 'mandelbulb':
-            shader_args = ' render_mandelbulb none none'
+            shader_args = ' render_mandelbulb ' + geometry + ' none'
         elif shader_name == 'wood':
-            shader_args = ' render_wood_real plane none'
+            shader_args = ' render_wood_real ' + geometry + ' none'
         render_util_dir = os.path.abspath('../../global_opt/proj/apps')
         render_single_full_name = os.path.abspath(os.path.join(render_util_dir, 'render_single.py'))
         cwd = os.getcwd()
         os.chdir(render_util_dir)
-        render_single_cmd = 'python ' + render_single_full_name + ' ' + os.path.join(cwd, name) + shader_args + ' --is-tf --code-only --log-intermediates'
+        render_single_cmd = 'python ' + render_single_full_name + ' ' + os.path.join(cwd, name) + shader_args + ' --is-tf --code-only --log-intermediates --no_compute_g'
         if not intersection:
             render_single_cmd = render_single_cmd + ' --log_intermediates_level 1'
         entire_cmd = 'cd ' + render_util_dir + ' && source activate py36 && ' + render_single_cmd + ' && source activate tensorflow35 && cd ' + cwd
@@ -112,7 +107,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
 
     #samples = [all_features[-2, :, :], all_features[-1, :, :]]
 
-    features, vec_output = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, return_vec_output=True, compiler_module=compiler_module, geometry=geometry)
+    features, vec_output = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, geometry=geometry, return_vec_output=True, compiler_module=compiler_module)
 
     color_features = vec_output
     with tf.control_dependencies(color_features):
@@ -830,6 +825,9 @@ def main():
     parser.add_argument('--two_stage_training', dest='two_stage_training', action='store_true', help='if specified, train first half epochs using RGB loss and next half epoch using RGB + gradient loss')
     parser.add_argument('--no_intersection', dest='intersection', action='store_false', help='if specified, do not include geometry intersection computation in intermediate variables')
     parser.add_argument('--multi_stage_new_minimizer', dest='new_minimizer', action='store_true', help='if specified, use a new minimizer if multiple stages exist')
+    parser.add_argument('--geometry', dest='geometry', default='plane', help='geometry of shader')
+    parser.add_argument('--RGB_norm', dest='RGB_norm', type=int, default=2, help='specify which p-norm to use for RGB loss')
+    parser.add_argument('--weight_map_add', dest='weight_map_add', action='store_true', help='if specified, loss on weight map is added to original loss')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -888,6 +886,7 @@ def main():
     parser.set_defaults(two_stage_training=False)
     parser.set_defaults(intersection=True)
     parser.set_defaults(new_minimizer=False)
+    parser.set_defaults(weight_map_add=False)
 
     args = parser.parse_args()
 
@@ -1090,7 +1089,7 @@ def main_network(args):
             print("sample count", shader_samples)
             feature_w = []
             color_inds = []
-            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection)
+            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection)
             color_inds = color_inds[::-1]
             debug_input = input_to_network
 
@@ -1221,11 +1220,18 @@ def main_network(args):
         diff = network + input_color - output
         network += input_color
 
+    if args.RGB_norm % 2 != 0:
+        diff = tf.abs(diff)
+    powered_diff = diff ** args.RGB_norm
+
     if not args.use_weight_map:
-        loss=tf.reduce_mean(tf.square(diff))
+        loss=tf.reduce_mean(powered_diff)
     else:
-        loss_map = tf.reduce_mean(tf.square(diff), axis=3)
-        loss = tf.reduce_mean(loss_map * weight_map)
+        loss_map = tf.reduce_mean(powered_diff, axis=3)
+        if args.weight_map_add:
+            loss = tf.reduce_mean(powered_diff) + tf.reduce_mean(loss_map * weight_map)
+        else:
+            loss = tf.reduce_mean(loss_map * weight_map)
 
     loss_l2 = loss
     loss_add_term = loss
