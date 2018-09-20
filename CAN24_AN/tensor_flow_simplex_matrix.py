@@ -128,7 +128,7 @@ def calculate_image(noise_values, phases, shape):
     , phases, 2)) + 1.0) * 128)
     return tf.concat([val, val, val], 2)
 
-def simplex_noise_2arg(x, y):
+def simplex_noise_2arg(x, y, debug=[]):
     phases = 10.0
     xx = tf.tile(tf.expand_dims(x, axis=3), [1, 1, 1, int(phases)])
     xx *= tf.cast(tf.pow(2.0, tf.linspace(0.0, (phases - 1), int(phases))), tf.float32)
@@ -163,4 +163,27 @@ if __name__ == "__main__":
     yv = np.repeat(yv, 1, axis=0)
     tensor_x0 = tf.constant(xv, dtype=tf.float32)
     tensor_x1 = tf.constant(yv, dtype=tf.float32)
-    simplex_noise_2arg(tensor_x0, tensor_x1)
+
+    stddev = 0.1
+
+    sample0 = tf.random_normal(xv.shape, stddev=stddev, dtype=tf.float32)
+    sample1 = tf.random_normal(yv.shape, stddev=stddev, dtype=tf.float32)
+
+    noise_orig = simplex_noise_2arg(tensor_x0, tensor_x1)
+    noise_sampled = simplex_noise_2arg(tensor_x0 + sample0, tensor_x1 + sample1)
+
+    import os
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+
+    sess = tf.Session()
+
+    noise_base = sess.run(noise_orig)
+    noise_accum = numpy.zeros(noise_base.shape)
+
+    N = 100
+    for i in range(N):
+        noise_accum += sess.run(noise_sampled)
+    noise_avg = noise_accum / N
+
+    skimage.io.imsave('noise_base.png', numpy.clip(numpy.squeeze(noise_base) / 4.0 + 0.5, 0.0, 1.0))
+    skimage.io.imsave('noise_avg.png', numpy.clip(numpy.squeeze(noise_avg) / 4.0 + 0.5, 0.0, 1.0))

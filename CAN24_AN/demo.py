@@ -71,6 +71,9 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             shader_args = ' render_mandelbulb ' + geometry + ' none'
         elif shader_name == 'wood':
             shader_args = ' render_wood_real ' + geometry + ' none'
+        elif shader_name == 'wood_staggered':
+            shader_args = ' render_wood_staggered ' + geometry + ' none'
+
         render_util_dir = os.path.abspath('../../global_opt/proj/apps')
         render_single_full_name = os.path.abspath(os.path.join(render_util_dir, 'render_single.py'))
         cwd = os.getcwd()
@@ -207,6 +210,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                     features = tf.sigmoid(30.0 * features) + tf.sigmoid(30.0 * (1 - features)) - 1.0
             else:
                 features = tf.clip_by_value(features, 0.0, 1.0)
+                #features = tf.minimum(tf.maximum(features, 0.0), 1.0)
 
             if not learn_scale:
                 features = tf.where(tf.is_nan(features), tf.zeros_like(features), features)
@@ -228,7 +232,10 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     #    compiler_problem_full_name = os.path.abspath('../../global_opt/proj/apps/compiler_problem')
     #    compiler_module = importlib.import_module(compiler_problem_full_name)
 
-    features_len = compiler_module.f_log_intermediate_len + 7
+    if geometry != 'none':
+        features_len = compiler_module.f_log_intermediate_len + 7
+    else:
+        features_len = compiler_module.f_log_intermediate_len + 2
     vec_output_len = compiler_module.vec_output_len
 
 
@@ -309,18 +316,27 @@ def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zig
 
     with tf.control_dependencies(vec_output):
         with tf.variable_scope("auxiliary"):
-            h = 1e-4
-            features_neg = get_features([x[0]-h, x[1], x[2]], camera_pos, geometry=geometry)
-            features_pos = get_features([x[0]+h, x[1], x[2]], camera_pos, geometry=geometry)
-            f_log_intermediate[features_len-7] = (features_pos[1] - features_neg[1]) / (2 * h)
-            f_log_intermediate[features_len-6] = (features_pos[2] - features_neg[2]) / (2 * h)
+            if geometry != 'none':
+                h = 1e-4
+                if geometry == 'plane':
+                    u_ind = 1
+                    v_ind = 2
+                elif geometry in ['hyperboloid1', 'sphere', 'paraboloid']:
+                    u_ind = 8
+                    v_ind = 9
+                else:
+                    raise
+                features_neg = get_features([x[0]-h, x[1], x[2]], camera_pos, geometry=geometry)
+                features_pos = get_features([x[0]+h, x[1], x[2]], camera_pos, geometry=geometry)
+                f_log_intermediate[features_len-7] = (features_pos[u_ind] - features_neg[u_ind]) / (2 * h)
+                f_log_intermediate[features_len-6] = (features_pos[v_ind] - features_neg[v_ind]) / (2 * h)
 
-            features_neg = get_features([x[0], x[1]-h, x[2]], camera_pos, geometry=geometry)
-            features_pos = get_features([x[0], x[1]+h, x[2]], camera_pos, geometry=geometry)
-            f_log_intermediate[features_len-5] = (features_pos[1] - features_neg[1]) / (2 * h)
-            f_log_intermediate[features_len-4] = (features_pos[2] - features_neg[2]) / (2 * h)
+                features_neg = get_features([x[0], x[1]-h, x[2]], camera_pos, geometry=geometry)
+                features_pos = get_features([x[0], x[1]+h, x[2]], camera_pos, geometry=geometry)
+                f_log_intermediate[features_len-5] = (features_pos[u_ind] - features_neg[u_ind]) / (2 * h)
+                f_log_intermediate[features_len-4] = (features_pos[v_ind] - features_neg[v_ind]) / (2 * h)
 
-            f_log_intermediate[features_len-3] = f_log_intermediate[features_len-7] * f_log_intermediate[features_len-4] - f_log_intermediate[features_len-6] * f_log_intermediate[features_len-5]
+                f_log_intermediate[features_len-3] = f_log_intermediate[features_len-7] * f_log_intermediate[features_len-4] - f_log_intermediate[features_len-6] * f_log_intermediate[features_len-5]
     return
 
 def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None]):
@@ -382,7 +398,7 @@ def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None]):
                                -2.0 * sphere_center[2],
                                sphere_center[0] * sphere_center[0] + sphere_center[1] * sphere_center[1] + sphere_center[2] * sphere_center[2] - sphere_radius * sphere_radius])
         solve_quadric(quadric, ray_origin, ray_dir_p, features)
-        feature_scale = 320.0 / numpy.pi
+        feature_scale = 80.0 / numpy.pi
         features[0] = x[2]
         u = tf.atan2(features[10], features[12])
         v = tf.acos(features[11])
@@ -401,7 +417,33 @@ def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None]):
         features[16] = -sin_u * cos_v
         features[17] = sin_v
         features[18] = -cos_u * cos_v
+    elif geometry == 'paraboloid':
+        features = [None] * 19
+        paraboloid_center = numpy.zeros(3)
+        paraboloid_radius = 30.0
+        paraboloid_raiuds2 = paraboloid_radius ** 2.0
+        paraboloid_xz_scale = 3.0
+        quadric = numpy.array([1.0, 0.0, 1.0 / paraboloid_xz_scale ** 2.0,
+                               0.0, 0.0, 0.0,
+                               -2.0 * paraboloid_center[0],
+                               -paraboloid_raiuds2,
+                               -2.0 * paraboloid_center[2],
+                               paraboloid_center[0] * paraboloid_center[0] + paraboloid_center[2] * paraboloid_center[2] / paraboloid_xz_scale ** 2.0 + paraboloid_center[1] * paraboloid_raiuds2])
+        t_ray = solve_quadric(quadric, ray_origin, ray_dir_p, features, debug=debug)
+        extra_args[0] = t_ray
+        feature_scale = 10.0
+        features[0] = x[2]
+        features[8] = (features[1] - paraboloid_center[0]) / feature_scale
+        features[9] = (features[3] - paraboloid_center[2]) / feature_scale
 
+        features[13] = 1.0
+        features[14] = 2.0 * feature_scale * features[8] / (paraboloid_raiuds2)
+        #features[14] = 0.0
+        features[15] = 0.0
+        features[16] = 0.0
+        features[17] = 2.0 * feature_scale * features[9] / (paraboloid_raiuds2 * paraboloid_xz_scale ** 2.0)
+        #features[17] = 0.0
+        features[18] = 1.0
     elif geometry == 'plane':
         features = [None] * 8
         t_ray = -ray_origin[2] / (ray_dir_p[2])
@@ -828,6 +870,7 @@ def main():
     parser.add_argument('--geometry', dest='geometry', default='plane', help='geometry of shader')
     parser.add_argument('--RGB_norm', dest='RGB_norm', type=int, default=2, help='specify which p-norm to use for RGB loss')
     parser.add_argument('--weight_map_add', dest='weight_map_add', action='store_true', help='if specified, loss on weight map is added to original loss')
+    parser.add_argument('--mean_estimator_memory_efficient', dest='mean_estimator_memory_efficient', action='store_true', help='if specified, use a memory efficient way to calculate mean estimator, but may not be accurate in time')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -887,6 +930,7 @@ def main():
     parser.set_defaults(intersection=True)
     parser.set_defaults(new_minimizer=False)
     parser.set_defaults(weight_map_add=False)
+    parser.set_defaults(mean_estimator_memory_efficient=False)
 
     args = parser.parse_args()
 
@@ -915,6 +959,7 @@ def copy_option(args):
     delattr(new_args, 'render_only')
     delattr(new_args, 'render_camera_pos')
     delattr(new_args, 'render_t')
+    delattr(new_args, 'mean_estimator_memory_efficient')
     return new_args
 
 def main_network(args):
@@ -1000,6 +1045,9 @@ def main_network(args):
     if args.render_only:
         args.is_train = False
 
+    if args.mean_estimator_memory_efficient:
+        assert not args.generate_timeline
+
     input_names, output_names, val_names, val_img_names, map_names, val_map_names, grad_names, val_grad_names = prepare_data_root(args.dataroot, use_weight_map=args.use_weight_map or args.gradient_loss_canny_weight, gradient_loss=args.gradient_loss)
     if args.test_training:
         val_names = input_names
@@ -1080,7 +1128,7 @@ def main_network(args):
                 output_type = 'bgr'
             else:
                 output_type = 'remove_constant'
-            if args.mean_estimator:
+            if args.mean_estimator and not args.mean_estimator_memory_efficient:
                 shader_samples = args.estimator_samples
             else:
                 shader_samples = 1
@@ -1213,7 +1261,7 @@ def main_network(args):
 
     weight_map = tf.placeholder(tf.float32,shape=[None,None,None])
 
-    if not args.train_res:
+    if (not args.train_res) or (args.debug_mode and args.mean_estimator):
         diff = network - output
     else:
         input_color = tf.stack([debug_input[:, :, :, ind] for ind in color_inds], axis=3)
@@ -1400,7 +1448,7 @@ def main_network(args):
         camera_pos_vals = np.load(os.path.join(args.dataroot, 'train.npy'))
         time_vals = np.load(os.path.join(args.dataroot, 'train_time.npy'))
     else:
-        if args.shader_name != 'mandelbulb':
+        if True:
             camera_pos_vals = np.concatenate((
                                 np.load(os.path.join(args.dataroot, 'test_close.npy')),
                                 np.load(os.path.join(args.dataroot, 'test_far.npy')),
@@ -1661,7 +1709,7 @@ def main_network(args):
                 camera_pos_vals = np.load(os.path.join(args.dataroot, 'train.npy'))
                 time_vals = np.load(os.path.join(args.dataroot, 'train_time.npy'))
             else:
-                if args.shader_name != 'mandelbulb':
+                if True:
                     camera_pos_vals = np.concatenate((
                                         np.load(os.path.join(args.dataroot, 'test_close.npy')),
                                         np.load(os.path.join(args.dataroot, 'test_far.npy')),
@@ -1751,14 +1799,25 @@ def main_network(args):
                         #pctx.trace_next_step()
                         #pctx.dump_next_step()
                         feed_dict[output] = output_ground
+                        output_buffer = numpy.zeros(output_ground.shape)
                         st = time.time()
-                        output_image, l2_loss_val, grad_loss_val = sess.run([network, loss_l2, loss_add_term], options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
+                        if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
+                            nruns = args.estimator_samples
+                        else:
+                            nruns = 1
+                        for k in range(nruns):
+                            output_image, l2_loss_val, grad_loss_val = sess.run([network, loss_l2, loss_add_term], options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
+                            if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
+                                output_buffer += output_image[:, :, :, ::-1]
                         st2 = time.time()
                         print("rough time estimate:", st2 - st)
                         #pctx.profiler.profile_operations(options=opts)
                         if train_from_queue or args.mean_estimator:
                             output_image = output_image[:, :, :, ::-1]
                         print("output_image swap axis")
+                        if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
+                            output_buffer /= args.estimator_samples
+                            output_image[:] = output_buffer[:]
                         loss_val = np.mean((output_image - output_ground) ** 2) * 255.0 * 255.0
                         print("loss", loss_val, l2_loss_val * 255.0 * 255.0)
                         all_test[i] = loss_val
