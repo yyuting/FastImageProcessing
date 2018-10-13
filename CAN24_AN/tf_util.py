@@ -2,8 +2,9 @@ import tensorflow as tf
 from tensor_flow_simplex_matrix import simplex_noise_2arg
 import numpy as np
 import numpy
+import math
 
-select = lambda a, b, c: a*b + (1-a)*c
+#select = lambda a, b, c: a*b + (1-a)*c
 
 np_perm = numpy.array([151, 160, 137, 91, 90, 15, 131, 13, 201, 95, 96, 53, 194, 233, 7, 225, 140, 36, 103, 30, 69, 142, 8, 99,
            37, 240, 21, 10, 23, 190, 6, 148, 247, 120, 234, 75, 0, 26, 197, 62, 94, 252, 219, 203, 117, 35, 11, 32,
@@ -45,6 +46,19 @@ def new_mul(x, y):
 tf.Tensor.__mul__ = new_mul
 tf.Tensor.__rmul__ = new_mul
 
+def select_nosmooth(a, b, c):
+    if isinstance(a, tf.Tensor):
+        if isinstance(b, (int, float)):
+            b = b * tf.ones_like(a)
+        if isinstance(c, (int, float)):
+            c = c * tf.ones_like(a)
+        if b == 0.0:
+            b = tf.zeros_like(a)
+        if c == 0.0:
+            c = tf.zeros_like(a)
+    return tf.where(tf.cast(a, bool), b, c)
+select = select_nosmooth
+
 def simplex_noise(a0, a1, a2, a3, a4, a5, x, y):
     return simplex_noise_2arg(x, y)
 
@@ -63,6 +77,8 @@ def tf_np_wrapper(func):
                 return 2.0 * tf.cast(x > 0.0, tf.float32) - 1.0
             else:
                 return 2.0 * float(x > 0.0) - 1.0
+        elif func == 'random_normal':
+            return tf.random_normal(tf.shape(x))
 
         if isinstance(x, tf.Tensor) or isinstance(y, tf.Tensor):
             if func == 'fmod':
@@ -70,7 +86,10 @@ def tf_np_wrapper(func):
             else:
                 actual_func = getattr(tf, func)
         else:
-            actual_func = getattr(np, func)
+            try:
+                actual_func = getattr(np, func)
+            except:
+                actual_func = getattr(math, func)
         if y is None:
             return actual_func(x)
         else:

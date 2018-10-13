@@ -187,6 +187,8 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                 else:
                     features += feature_bias
                     features *= feature_scale
+            elif output_type in ['rgb', 'bgr']: # workaround because clip_by_value will make all nans to be the higher value
+                features = tf.where(tf.is_nan(features), tf.zeros_like(features), features)
             elif learn_scale:
                 old_features = features
                 features = tf.where(tf.is_finite(old_features), features, tf.zeros_like(features))
@@ -219,7 +221,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
     #numpy.save('valid_inds.npy', valid_inds)
     #return features
 
-def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None, geometry='plane', zero_samples=False, debug=[], extra_args=[None]):
+def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None, geometry='plane', zero_samples=False, debug=[], extra_args=[None], render_g=False):
     vec_output_len = 3
     assert compiler_module is not None
     #if shader_name == 'zigzag':
@@ -281,7 +283,7 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     #vector3 = [tensor_x0, tensor_x1, tensor_x2]
     f_log_intermediate[0] = shader_time
     f_log_intermediate[1] = camera_pos
-    get_shader(vector3, f_log_intermediate, camera_pos, features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output, compiler_module=compiler_module, geometry=geometry, debug=debug, extra_args=extra_args)
+    get_shader(vector3, f_log_intermediate, camera_pos, features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output, compiler_module=compiler_module, geometry=geometry, debug=debug, extra_args=extra_args, render_g=render_g)
 
     f_log_intermediate[features_len-2] = sample1
     f_log_intermediate[features_len-1] = sample2
@@ -291,7 +293,7 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     else:
         return f_log_intermediate
 
-def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zigzag', color_inds=None, vec_output=None, compiler_module=None, geometry='plane', debug=[], extra_args=[None]):
+def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zigzag', color_inds=None, vec_output=None, compiler_module=None, geometry='plane', debug=[], extra_args=[None], render_g=False):
     assert compiler_module is not None
     features = get_features(x, camera_pos, geometry=geometry, debug=debug, extra_args=extra_args)
     if vec_output is None:
@@ -307,14 +309,15 @@ def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zig
     #else:
     #    raise
 
-    compiler_module.f(features, f_log_intermediate, vec_output)
+    #compiler_module.f(features, f_log_intermediate, vec_output)
 
     #if color_inds is None:
     #    color_features = None
     #else:
     #    color_features = [f_log_intermediate[i] for i in range(len(f_log_intermediate)) if i in color_inds]
 
-    with tf.control_dependencies(vec_output):
+    #with tf.control_dependencies(vec_output):
+    if True:
         with tf.variable_scope("auxiliary"):
             if geometry != 'none':
                 h = 1e-4
@@ -326,17 +329,29 @@ def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zig
                     v_ind = 9
                 else:
                     raise
-                features_neg = get_features([x[0]-h, x[1], x[2]], camera_pos, geometry=geometry)
-                features_pos = get_features([x[0]+h, x[1], x[2]], camera_pos, geometry=geometry)
-                f_log_intermediate[features_len-7] = (features_pos[u_ind] - features_neg[u_ind]) / (2 * h)
-                f_log_intermediate[features_len-6] = (features_pos[v_ind] - features_neg[v_ind]) / (2 * h)
+                features_neg_x = get_features([x[0]-h, x[1], x[2]], camera_pos, geometry=geometry)
+                features_pos_x = get_features([x[0]+h, x[1], x[2]], camera_pos, geometry=geometry)
+                f_log_intermediate[features_len-7] = (features_pos_x[u_ind] - features_neg_x[u_ind]) / (2 * h)
+                f_log_intermediate[features_len-6] = (features_pos_x[v_ind] - features_neg_x[v_ind]) / (2 * h)
 
-                features_neg = get_features([x[0], x[1]-h, x[2]], camera_pos, geometry=geometry)
-                features_pos = get_features([x[0], x[1]+h, x[2]], camera_pos, geometry=geometry)
-                f_log_intermediate[features_len-5] = (features_pos[u_ind] - features_neg[u_ind]) / (2 * h)
-                f_log_intermediate[features_len-4] = (features_pos[v_ind] - features_neg[v_ind]) / (2 * h)
+                features_neg_y = get_features([x[0], x[1]-h, x[2]], camera_pos, geometry=geometry)
+                features_pos_y = get_features([x[0], x[1]+h, x[2]], camera_pos, geometry=geometry)
+                f_log_intermediate[features_len-5] = (features_pos_y[u_ind] - features_neg_y[u_ind]) / (2 * h)
+                f_log_intermediate[features_len-4] = (features_pos_y[v_ind] - features_neg_y[v_ind]) / (2 * h)
 
                 f_log_intermediate[features_len-3] = f_log_intermediate[features_len-7] * f_log_intermediate[features_len-4] - f_log_intermediate[features_len-6] * f_log_intermediate[features_len-5]
+
+    if not render_g:
+        compiler_module.f(features, f_log_intermediate, vec_output)
+    else:
+        assert geometry != 'none'
+        sigma = [None] * len(features)
+        for i in range(len(features)):
+            variance = (tf.square((features_pos_x[i] - features[i]) / h) * 0.25 + tf.square(numpy.array(features_pos_y[i] - features[i]) / h) * 0.25)
+            sigma[i] = tf.sqrt(variance)
+            sigma[i] = tf.where(tf.is_nan(sigma[i]), tf.zeros_like(sigma[i]), sigma[i])
+        compiler_module.g(features, vec_output, sigma)
+
     return
 
 def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None]):
