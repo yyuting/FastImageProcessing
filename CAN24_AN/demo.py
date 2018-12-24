@@ -20,14 +20,13 @@ import importlib
 import importlib.util
 import subprocess
 import shutil
+from tf_util import *
 
 allowed_dtypes = ['float64', 'float32', 'uint8']
 no_L1_reg_other_layers = True
 
 width = 500
 height = 400
-
-dtype = tf.float32
 
 batch_norm_is_training = True
 
@@ -37,7 +36,10 @@ identity_output_layer = True
 
 less_aggresive_ini = False
 
-def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True):
+conv_padding = "SAME"
+padding_offset = 32
+
+def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True, sigmoid_scaling=False, manual_features_only=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular'):
     # 2x_1sample on margo
     #camera_pos = np.load('/localtmp/yuting/out_2x1_manual_carft/train.npy')[0, :]
 
@@ -45,13 +47,17 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
     #feature_bias = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/datas_rescaled_25_75_2_153/feature_bias.npy')
 
     if output_type not in ['rgb', 'bgr']:
-        feature_scale = np.load(os.path.join(dataroot, 'feature_scale.npy'))
-        feature_bias = np.load(os.path.join(dataroot, 'feature_bias.npy'))
+        if not sigmoid_scaling:
+            feature_scale = np.load(os.path.join(dataroot, 'feature_scale.npy'))
+            feature_bias = np.load(os.path.join(dataroot, 'feature_bias.npy'))
 
-        Q1 = np.load(os.path.join(dataroot, 'Q1.npy'))
-        Q3 = np.load(os.path.join(dataroot, 'Q3.npy'))
-        IQR = np.load(os.path.join(dataroot, 'IQR.npy'))
-        tolerance = 2.0
+            #Q1 = np.load(os.path.join(dataroot, 'Q1.npy'))
+            #Q3 = np.load(os.path.join(dataroot, 'Q3.npy'))
+            #IQR = np.load(os.path.join(dataroot, 'IQR.npy'))
+            tolerance = 2.0
+        else:
+            feature_mean = np.load(os.path.join(dataroot, 'feature_mean.npy'))
+            feature_var = np.load(os.path.join(dataroot, 'feature_var.npy'))
 
     compiler_problem_full_name = os.path.abspath(os.path.join(name, 'compiler_problem.py'))
     if not os.path.exists(compiler_problem_full_name):
@@ -73,6 +79,10 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             shader_args = ' render_wood_real ' + geometry + ' none'
         elif shader_name == 'wood_staggered':
             shader_args = ' render_wood_staggered ' + geometry + ' none'
+        elif shader_name == 'primitives_aliasing':
+            shader_args = ' render_primitives_aliasing ' + geometry + ' none'
+        elif shader_name == 'trippy_heart':
+            shader_args = ' render_trippy_heart ' + geometry + ' none'
 
         render_util_dir = os.path.abspath('../../global_opt/proj/apps')
         render_single_full_name = os.path.abspath(os.path.join(render_util_dir, 'render_single.py'))
@@ -81,7 +91,11 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
         render_single_cmd = 'python ' + render_single_full_name + ' ' + os.path.join(cwd, name) + shader_args + ' --is-tf --code-only --log-intermediates --no_compute_g'
         if not intersection:
             render_single_cmd = render_single_cmd + ' --log_intermediates_level 1'
-        entire_cmd = 'cd ' + render_util_dir + ' && source activate py36 && ' + render_single_cmd + ' && source activate tensorflow35 && cd ' + cwd
+        if manual_features_only:
+            render_single_cmd = render_single_cmd + ' --log_intermediates_subset_level 1'
+        if collect_loop_statistic:
+            render_single_cmd = render_single_cmd + ' --collect_loop_statistic'
+        entire_cmd = 'cd ' + render_util_dir + ' && ' + render_single_cmd + ' && cd ' + cwd
         ans = os.system(entire_cmd)
         #ans = subprocess.call('cd ' + render_util_dir + ' && source activate py36 && python ' + render_single_full_name + ' out ' + shader_args + ' --is-tf --code-only --log-intermediates && source activate tensorflow35 && cd ' + cwd)
 
@@ -110,57 +124,86 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
 
     #samples = [all_features[-2, :, :], all_features[-1, :, :]]
 
-    features, vec_output = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, geometry=geometry, return_vec_output=True, compiler_module=compiler_module)
+    features, vec_output, manual_features = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, geometry=geometry, return_vec_output=True, compiler_module=compiler_module, manual_features_only=manual_features_only, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=samples, fov=fov)
+
+    if len(vec_output) > 3:
+        loop_statistic = vec_output[3:]
+        vec_output = vec_output[:3]
+        features = features + loop_statistic
 
     color_features = vec_output
+    valid_features = []
     with tf.control_dependencies(color_features):
         with tf.variable_scope("auxiliary"):
             valid_inds = []
-
             feature_ind = 0
-            for i in range(len(features)):
-                if isinstance(features[i], (float, int)):
-                    continue
-                else:
-                    #features[i] = tf.clip_by_value(features[i], Q1[feature_ind] - tolerance * IQR[feature_ind], Q3[feature_ind] + tolerance * IQR[feature_ind])
-                    #features[i] += feature_bias[feature_ind]
-                    #features[i] *= feature_scale[feature_ind]
-
-                    #features[i] = tf.clip_by_value(features[i], 0.0, 1.0)
+            if output_type in ['rgb', 'bgr']:
+                valid_features = vec_output
+                valid_inds = [0, 1, 2]
+            else:
+                for i in range(len(features)):
+                    if isinstance(features[i], (float, int)):
+                        continue
+                    else:
+                        if efficient_trace:
+                            if features[i] in valid_features:
+                                continue
                     feature_ind += 1
-                #features[i] += feature_bias[i]
-                #features[i] *= feature_scale[i]
-                #if isinstance(features[i], (float, int)):
-                #    features[i] = tf.constant(features[i], dtype=dtype, shape=(height, width))
-                #    continue
-                valid_inds.append(i)
-                #features[i] += feature_bias[i]
-                #features[i] *= feature_scale[i]
-            #features = tf.expand_dims(tf.stack(features, axis=2), axis=0)
+                    valid_inds.append(i)
+                    valid_features.append(features[i])
 
-            #if not all_features_only:
-            #    features_dummy = tf.stack([features[0], features[250], features[255]], axis=2)
-            #    features_dummy_list = tf.unstack(features_dummy, axis=2)
-            #    features[0] = features_dummy_list[0]
-            #    features[250] = features_dummy_list[1]
-            #    features[255] = features_dummy_list[2]
+            for i in range(len(valid_features)):
+                if valid_features[i].dtype != dtype:
+                    valid_features[i] = tf.cast(valid_features[i], dtype)
+            #valid_features = [features[k] for k in valid_inds]
+
+            if manual_features_only:
+                manual_inds = []
+                manual_features_valid = []
+                additional_bias = []
+                additional_scale = []
+                for k in range(len(manual_features)):
+                    feature = manual_features[k]
+                    if not isinstance(feature, (float, int)):
+                        try:
+                            raw_ind = valid_features.index(feature)
+                            manual_inds.append(raw_ind)
+                            manual_features_valid.append(feature)
+                        except ValueError:
+                            if k == len(manual_features) - 1:
+                                # t_ray case
+                                assert geometry in ['hyperboloid1', 'paraboloid']
+                                t_ray_bias = numpy.load(os.path.join(dataroot, 't_ray_bias.npy'))
+                                t_ray_scale = numpy.load(os.path.join(dataroot, 't_ray_scale.npy'))
+                                additional_bias.append(t_ray_bias[0])
+                                additional_scale.append(t_ray_scale[0])
+                                manual_features_valid.append(feature)
+                            else:
+                                raise
+                        except:
+                            raise
+                out_features = manual_features_valid
+                feature_bias = feature_bias[manual_inds]
+                feature_scale = feature_scale[manual_inds]
+                if len(additional_bias):
+                    feature_bias = numpy.concatenate((feature_bias, numpy.array(additional_bias)))
+                    feature_scale = numpy.concatenate((feature_scale, numpy.array(additional_scale)))
+            else:
+                out_features = valid_features
 
             for vec in vec_output:
-                raw_ind = features.index(vec)
-                actual_ind = valid_inds.index(raw_ind)
+                #raw_ind = features.index(vec)
+                #actual_ind = valid_inds.index(raw_ind)
+                actual_ind = out_features.index(vec)
                 color_inds.append(actual_ind)
 
-            if output_type not in ['rgb', 'bgr']:
+            if output_type not in ['rgb', 'bgr'] and not sigmoid_scaling:
                 for ind in color_inds:
                     feature_bias[ind] = 0.0
                     feature_scale[ind] = 1.0
 
             if output_type == 'remove_constant':
-                #if shader_name == 'mandelbulb':
-                if False:
-                    features = tf.parallel_stack([features[k] for k in valid_inds[-1000:]])
-                else:
-                    features = tf.parallel_stack([features[k] for k in valid_inds])
+                features = tf.parallel_stack(out_features)
                 features = tf.transpose(features, [1, 2, 3, 0])
                 if False:
                     valid_features = [features[k] for k in valid_inds]
@@ -170,6 +213,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                         assign_ops.append(features_tensor[:, :, :, k].assign(valid_features[k]))
                     with tf.control_dependencies(assign_ops):
                         features = tf.identity(features_tensor)
+
             elif output_type == 'all':
                 features = tf.cast(tf.stack(features, axis=3), tf.float32)
             elif output_type in ['rgb', 'bgr']:
@@ -180,13 +224,42 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                 raise
 
             if (output_type not in ['rgb', 'bgr']) and not learn_scale:
-                #if shader_name == 'mandelbulb':
-                if False:
-                    features += feature_bias[-1000:]
-                    features *= feature_scale[-1000:]
+                if sigmoid_scaling:
+                    # tf.sigmoid is able to handle inf and -inf correctly
+                    features -= feature_mean
+                    features /= feature_var
+                    features = tf.sigmoid(features)
+                    color_features = [tf.expand_dims(valid_features[k], axis=3) for k in color_inds]
+                    features = tf.concat([features] + color_features, axis=3)
+                    valid_features_len = len(valid_inds)
+                    color_inds[0] = valid_features_len-3
+                    color_inds[1] = valid_features_len-2
+                    color_inds[2] = valid_features_len-1
                 else:
                     features += feature_bias
                     features *= feature_scale
+
+                # sanity check for manual features
+                if manual_features_only and False:
+                    manual_inds = []
+                    manual_features_valid = []
+                    for feature in manual_features:
+                        if not isinstance(feature, (float, int)):
+                            raw_ind = valid_features.index(feature)
+                            manual_inds.append(raw_ind)
+                            manual_features_valid.append(feature)
+                    manual_features_valid = tf.parallel_stack(manual_features_valid)
+                    manual_features_valid = tf.transpose(manual_features_valid, [1, 2, 3, 0])
+                    manual_features_valid += feature_bias[manual_inds]
+                    manual_features_valid *= feature_scale[manual_inds]
+
+                    camera_pos_val = numpy.load(os.path.join(dataroot, 'train.npy'))
+                    feed_dict = {camera_pos: camera_pos_val[0], shader_time:[0]}
+                    sess = tf.Session()
+                    manual_features_val, features_val = sess.run([manual_features_valid, features], feed_dict=feed_dict)
+                    for k in range(len(manual_inds)):
+                        print(numpy.max(numpy.abs(manual_features_val[:, :, :, k] - features_val[:, :, :, manual_inds[k]])))
+
             elif output_type in ['rgb', 'bgr']: # workaround because clip_by_value will make all nans to be the higher value
                 features = tf.where(tf.is_nan(features), tf.zeros_like(features), features)
             elif learn_scale:
@@ -210,7 +283,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                     features = 0.5 * (tf.erf(10.0 * features) + tf.erf(10.0 * (1 - features)))
                 else:
                     features = tf.sigmoid(30.0 * features) + tf.sigmoid(30.0 * (1 - features)) - 1.0
-            else:
+            elif not sigmoid_scaling:
                 features = tf.clip_by_value(features, 0.0, 1.0)
                 #features = tf.minimum(tf.maximum(features, 0.0), 1.0)
 
@@ -221,8 +294,8 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
     #numpy.save('valid_inds.npy', valid_inds)
     #return features
 
-def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None, geometry='plane', zero_samples=False, debug=[], extra_args=[None], render_g=False):
-    vec_output_len = 3
+def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None, geometry='plane', zero_samples=False, debug=[], extra_args=[None], render_g=False, manual_features_only=False, fov='regular', h_start=0, h_offset=height, w_start=0, w_offset=width):
+    #vec_output_len = compiler_module.vec_output_len
     assert compiler_module is not None
     #if shader_name == 'zigzag':
     #    features_len = 266
@@ -240,6 +313,13 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
         features_len = compiler_module.f_log_intermediate_len + 2
     vec_output_len = compiler_module.vec_output_len
 
+    if manual_features_only:
+        manual_features_len = compiler_module.f_log_intermediate_subset_len
+        if geometry != 'none':
+            manual_features_len += 1
+        f_log_intermediate_subset = [None] * manual_features_len
+    else:
+        f_log_intermediate_subset = []
 
     f_log_intermediate = [None] * features_len
     vec_output = [None] * vec_output_len
@@ -250,27 +330,54 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
         width = render_size[0]
         height = render_size[1]
 
-    xv, yv = numpy.meshgrid(numpy.arange(width), numpy.arange(height), indexing='ij')
-    xv = np.transpose(xv)
-    yv = np.transpose(yv)
-    xv = np.expand_dims(xv, 0)
-    yv = np.expand_dims(yv, 0)
-    xv = np.repeat(xv, nsamples, axis=0)
-    yv = np.repeat(yv, nsamples, axis=0)
-    tensor_x0 = tf.constant(xv, dtype=dtype)
-    tensor_x1 = tf.constant(yv, dtype=dtype)
-    tensor_x2 = shader_time * tf.constant(1.0, dtype=dtype, shape=xv.shape)
+    if False:
+        xv, yv = numpy.meshgrid(numpy.arange(width), numpy.arange(height), indexing='ij')
+        xv = np.transpose(xv)
+        yv = np.transpose(yv)
+        xv = np.expand_dims(xv, 0)
+        yv = np.expand_dims(yv, 0)
+        xv_final = np.repeat(xv, nsamples, axis=0)
+        yv_final = np.repeat(yv, nsamples, axis=0)
+        tensor_x0 = tf.constant(xv, dtype=dtype)
+        tensor_x1 = tf.constant(yv, dtype=dtype)
+    xv, yv = tf.meshgrid(w_start + tf.range(w_offset, dtype=dtype), h_start + tf.range(h_offset, dtype=dtype), indexing='ij')
+    xv = tf.transpose(xv)
+    yv = tf.transpose(yv)
+    xv = tf.expand_dims(xv, 0)
+    yv = tf.expand_dims(yv, 0)
+    xv = tf.tile(xv, [nsamples, 1, 1])
+    yv = tf.tile(yv, [nsamples, 1, 1])
+    tensor_x0 = xv
+    tensor_x1 = yv
+    #tensor_x2 = shader_time * tf.constant(1.0, dtype=dtype, shape=xv.shape)
+    tensor_x2 = shader_time * tf.cast(tf.fill(tf.shape(xv), 1.0), dtype)
 
     if samples is None:
         print("creating random samples")
-        sample1 = tf.random_normal(xv.shape, dtype=dtype)
-        sample2 = tf.random_normal(xv.shape, dtype=dtype)
+        sample1 = tf.random_normal(tf.shape(xv), dtype=dtype)
+        sample2 = tf.random_normal(tf.shape(xv), dtype=dtype)
     else:
-        #sample1 = tf.constant(samples[0], dtype=dtype)
-        #sample2 = tf.constant(samples[1], dtype=dtype)
-        if dtype == tf.float64:
-            sample1 = samples[0].astype(np.float64)
-            sample2 = samples[1].astype(np.float64)
+        if isinstance(samples[0], numpy.ndarray) and isinstance(samples[1], numpy.ndarray):
+            sample1 = tf.constant(samples[0], dtype=dtype)
+            sample2 = tf.constant(samples[1], dtype=dtype)
+            if samples[0].shape[1] == height + padding_offset and samples[0].shape[2] == width + padding_offset:
+                start_slice = [0, tf.cast(h_start, tf.int32) + padding_offset // 2, tf.cast(w_start, tf.int32) + padding_offset // 2]
+                size_slice = [nsamples, int(h_offset), int(w_offset)]
+                sample1 = tf.slice(sample1, start_slice, size_slice)
+                sample2 = tf.slice(sample2, start_slice, size_slice)
+            else:
+                assert samples[0].shape[1] == h_offset and samples[1].shape[2] == w_offset
+        else:
+            assert isinstance(samples[0], tf.Tensor) and isinstance(samples[1], tf.Tensor)
+            sample1 = samples[0]
+            sample2 = samples[1]
+            start_slice = [0, tf.cast(h_start, tf.int32) + padding_offset // 2, tf.cast(w_start, tf.int32) + padding_offset // 2]
+            size_slice = [nsamples, int(h_offset), int(w_offset)]
+            sample1 = tf.slice(sample1, start_slice, size_slice)
+            sample2 = tf.slice(sample2, start_slice, size_slice)
+        #if dtype == tf.float64:
+        #    sample1 = samples[0].astype(np.float64)
+        #    sample2 = samples[1].astype(np.float64)
 
     if render_sigma is None:
         render_sigma = [0.5, 0.5, 0.0]
@@ -283,21 +390,30 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     #vector3 = [tensor_x0, tensor_x1, tensor_x2]
     f_log_intermediate[0] = shader_time
     f_log_intermediate[1] = camera_pos
-    get_shader(vector3, f_log_intermediate, camera_pos, features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output, compiler_module=compiler_module, geometry=geometry, debug=debug, extra_args=extra_args, render_g=render_g)
+    get_shader(vector3, f_log_intermediate, f_log_intermediate_subset, camera_pos, features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output, compiler_module=compiler_module, geometry=geometry, debug=debug, extra_args=extra_args, render_g=render_g, manual_features_only=manual_features_only, fov=fov)
 
     f_log_intermediate[features_len-2] = sample1
     f_log_intermediate[features_len-1] = sample2
 
     if return_vec_output:
-        return f_log_intermediate, vec_output
+        return f_log_intermediate, vec_output, f_log_intermediate_subset
     else:
         return f_log_intermediate
 
-def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zigzag', color_inds=None, vec_output=None, compiler_module=None, geometry='plane', debug=[], extra_args=[None], render_g=False):
+def get_shader(x, f_log_intermediate, f_log_intermediate_subset, camera_pos, features_len, shader_name='zigzag', color_inds=None, vec_output=None, compiler_module=None, geometry='plane', debug=[], extra_args=[None], render_g=False, manual_features_only=False, fov='regular'):
     assert compiler_module is not None
-    features = get_features(x, camera_pos, geometry=geometry, debug=debug, extra_args=extra_args)
+    features = get_features(x, camera_pos, geometry=geometry, debug=debug, extra_args=extra_args, fov=fov)
     if vec_output is None:
         vec_output = [None] * 3
+
+    if manual_features_only:
+        # adding depth
+        if geometry == 'plane':
+            f_log_intermediate_subset[-1] = features[7]
+        elif geometry in ['hyperboloid1', 'paraboloid']:
+            f_log_intermediate_subset[-1] = extra_args[0]
+        elif geometry != 'none':
+            raise
     #if shader_name == 'zigzag':
     #    zigzag_f(features, f_log_intermediate)
     #elif shader_name == 'sin_quadratic':
@@ -320,7 +436,10 @@ def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zig
     if True:
         with tf.variable_scope("auxiliary"):
             if geometry != 'none':
-                h = 1e-4
+                if not render_g:
+                    h = 1e-4
+                else:
+                    h = 1e-8
                 if geometry == 'plane':
                     u_ind = 1
                     v_ind = 2
@@ -329,20 +448,23 @@ def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zig
                     v_ind = 9
                 else:
                     raise
-                features_neg_x = get_features([x[0]-h, x[1], x[2]], camera_pos, geometry=geometry)
-                features_pos_x = get_features([x[0]+h, x[1], x[2]], camera_pos, geometry=geometry)
+                features_neg_x = get_features([x[0]-h, x[1], x[2]], camera_pos, geometry=geometry, fov=fov)
+                features_pos_x = get_features([x[0]+h, x[1], x[2]], camera_pos, geometry=geometry, fov=fov)
                 f_log_intermediate[features_len-7] = (features_pos_x[u_ind] - features_neg_x[u_ind]) / (2 * h)
                 f_log_intermediate[features_len-6] = (features_pos_x[v_ind] - features_neg_x[v_ind]) / (2 * h)
 
-                features_neg_y = get_features([x[0], x[1]-h, x[2]], camera_pos, geometry=geometry)
-                features_pos_y = get_features([x[0], x[1]+h, x[2]], camera_pos, geometry=geometry)
+                features_neg_y = get_features([x[0], x[1]-h, x[2]], camera_pos, geometry=geometry, fov=fov)
+                features_pos_y = get_features([x[0], x[1]+h, x[2]], camera_pos, geometry=geometry, fov=fov)
                 f_log_intermediate[features_len-5] = (features_pos_y[u_ind] - features_neg_y[u_ind]) / (2 * h)
                 f_log_intermediate[features_len-4] = (features_pos_y[v_ind] - features_neg_y[v_ind]) / (2 * h)
 
                 f_log_intermediate[features_len-3] = f_log_intermediate[features_len-7] * f_log_intermediate[features_len-4] - f_log_intermediate[features_len-6] * f_log_intermediate[features_len-5]
 
     if not render_g:
-        compiler_module.f(features, f_log_intermediate, vec_output)
+        if not manual_features_only:
+            compiler_module.f(features, f_log_intermediate, vec_output)
+        else:
+            compiler_module.f(features, f_log_intermediate, vec_output, f_log_intermediate_subset)
     else:
         assert geometry != 'none'
         sigma = [None] * len(features)
@@ -350,12 +472,30 @@ def get_shader(x, f_log_intermediate, camera_pos, features_len, shader_name='zig
             variance = (tf.square((features_pos_x[i] - features[i]) / h) * 0.25 + tf.square(numpy.array(features_pos_y[i] - features[i]) / h) * 0.25)
             sigma[i] = tf.sqrt(variance)
             sigma[i] = tf.where(tf.is_nan(sigma[i]), tf.zeros_like(sigma[i]), sigma[i])
+        # workaround for bug in shader compiler
+        if geometry == 'plane':
+            sigma[7] = 0.0
+        global dtype
+        dtype = tf.float32
+        for i in range(len(features)):
+            if isinstance(features[i], tf.Tensor):
+                features[i] = tf.cast(features[i], dtype)
+            if isinstance(sigma[i], tf.Tensor):
+                sigma[i] = tf.cast(sigma[i], dtype)
+        vec_output[0] = debug[0]
         compiler_module.g(features, vec_output, sigma)
 
     return
 
-def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None]):
-    ray_dir = [x[0] - width / 2, x[1] + 1, width / 2]
+def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None], fov='regular'):
+    if fov == 'regular':
+        ray_dir = [x[0] - width / 2, x[1] + 1, width / 2]
+        print("use regular fov (90 degrees horizontally)")
+    elif fov == 'small':
+        ray_dir = [x[0] - width / 2, x[1] - height / 2, 1.73 * width / 2]
+        print("use small fov (60 degrees horizontally)")
+    else:
+        raise
     ray_origin = [camera_pos[0], camera_pos[1], camera_pos[2]]
 
     ray_dir_norm = tf.sqrt(ray_dir[0] **2 + ray_dir[1] ** 2 + ray_dir[2] ** 2)
@@ -476,6 +616,9 @@ def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None]):
         features[1] = ray_dir_p[0]
         features[2] = ray_dir_p[1]
         features[3] = ray_dir_p[2]
+        #features[4] = ray_dir[0]
+        #features[5] = ray_dir[1]
+        #features[6] = ray_dir[2]
         features[4] = ray_origin[0] * tf.constant(1.0, dtype=dtype, shape=x[0].shape)
         features[5] = ray_origin[1] * tf.constant(1.0, dtype=dtype, shape=x[0].shape)
         features[6] = ray_origin[2] * tf.constant(1.0, dtype=dtype, shape=x[0].shape)
@@ -655,9 +798,9 @@ def build(input, ini_id=True, regularizer_scale=0.0, share_weights=False, final_
     if not no_L1_reg_other_layers and regularizer_scale > 0.0:
         regularizer = slim.l1_regularizer(regularizer_scale)
     if ini_id or identity_initialize:
-        net=slim.conv2d(input,actual_conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(allow_map_to_less=True),scope='g_conv1',weights_regularizer=regularizer)
+        net=slim.conv2d(input,actual_conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(allow_map_to_less=True),scope='g_conv1',weights_regularizer=regularizer, padding=conv_padding)
     else:
-        net=slim.conv2d(input,actual_conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,scope='g_conv1',weights_regularizer=regularizer)
+        net=slim.conv2d(input,actual_conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,scope='g_conv1',weights_regularizer=regularizer, padding=conv_padding)
 
     dilation_schedule = [2, 4, 8, 16, 32, 64]
     for ind in range(len(dilation_schedule)):
@@ -671,23 +814,23 @@ def build(input, ini_id=True, regularizer_scale=0.0, share_weights=False, final_
             elif dilation_remove_layer:
                 continue
         print('rate is', dilation_rate)
-        net=slim.conv2d(net,actual_conv_channel,[3,3],rate=dilation_rate,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv'+str(conv_ind),weights_regularizer=regularizer)
+        net=slim.conv2d(net,actual_conv_channel,[3,3],rate=dilation_rate,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv'+str(conv_ind),weights_regularizer=regularizer, padding=conv_padding)
 #    net=slim.conv2d(net,24,[3,3],rate=128,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv8')
 
-    net=slim.conv2d(net,actual_conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv9',weights_regularizer=regularizer)
+    net=slim.conv2d(net,actual_conv_channel,[3,3],rate=1,activation_fn=lrelu,normalizer_fn=nm,weights_initializer=identity_initializer(),scope='g_conv9',weights_regularizer=regularizer, padding=conv_padding)
     if final_layer_channels > 0:
         if actual_conv_channel > final_layer_channels and (not identity_initialize):
-            net = slim.conv2d(net, final_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, scope='final_0', weights_regularizer=regularizer)
+            net = slim.conv2d(net, final_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, scope='final_0', weights_regularizer=regularizer, padding=conv_padding)
             nlayers = [1, 2]
         else:
             nlayers = [0, 1, 2]
         for nlayer in nlayers:
-            net = slim.conv2d(net, final_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(allow_map_to_less=True), scope='final_'+str(nlayer),weights_regularizer=regularizer)
+            net = slim.conv2d(net, final_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(allow_map_to_less=True), scope='final_'+str(nlayer),weights_regularizer=regularizer, padding=conv_padding)
 
     if share_weights:
         net = tf.expand_dims(tf.reduce_mean(net, 0), 0)
     print('identity last layer?', identity_initialize and identity_output_layer)
-    net=slim.conv2d(net,3,[1,1],rate=1,activation_fn=None,scope='g_conv_last',weights_regularizer=regularizer, weights_initializer=identity_initializer(allow_map_to_less=True) if (identity_initialize and identity_output_layer) else tf.contrib.layers.xavier_initializer())
+    net=slim.conv2d(net,3,[1,1],rate=1,activation_fn=None,scope='g_conv_last',weights_regularizer=regularizer, weights_initializer=identity_initializer(allow_map_to_less=True) if (identity_initialize and identity_output_layer) else tf.contrib.layers.xavier_initializer(), padding=conv_padding)
     return net
 
 def prepare_data(task):
@@ -886,6 +1029,17 @@ def main():
     parser.add_argument('--RGB_norm', dest='RGB_norm', type=int, default=2, help='specify which p-norm to use for RGB loss')
     parser.add_argument('--weight_map_add', dest='weight_map_add', action='store_true', help='if specified, loss on weight map is added to original loss')
     parser.add_argument('--mean_estimator_memory_efficient', dest='mean_estimator_memory_efficient', action='store_true', help='if specified, use a memory efficient way to calculate mean estimator, but may not be accurate in time')
+    parser.add_argument('--sigmoid_scaling', dest='sigmoid_scaling', action='store_true', help='if specified, use sigmoid scaling instead of 0-1 scaling')
+    parser.add_argument('--visualize_scaling', dest='visualize_scaling', action='store_true', help='if specified, visualize every feature after scaling for the first test data')
+    parser.add_argument('--visualize_ind', dest='visualize_ind', type=int, default=0, help='specifies the ind of testing dataset for visualization')
+    parser.add_argument('--manual_features_only', dest='manual_features_only', action='store_true', help='if specified, use only manual features already specified in each shader program')
+    parser.add_argument('--efficient_trace', dest='efficient_trace', action='store_true', help='if specified, use traces that are unique')
+    parser.add_argument('--collect_loop_statistic', dest='collect_loop_statistic', action='store_true', help='if specified, use loop statistic only')
+    parser.add_argument('--tiled_training', dest='tiled_training', action='store_true', help='if specified, use tiled training')
+    parser.add_argument('--tiled_w', dest='tiled_w', type=int, default=240, help='default width for tiles if using tiled training')
+    parser.add_argument('--tiled_h', dest='tiled_h', type=int, default=320, help='default height for tiles if using tiled training')
+    parser.add_argument('--test_tiling', dest='test_tiling', action='store_true', help='debug mode to test tiling')
+    parser.add_argument('--fov', dest='fov', default='regular', help='specified the camera field of view')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -946,6 +1100,12 @@ def main():
     parser.set_defaults(new_minimizer=False)
     parser.set_defaults(weight_map_add=False)
     parser.set_defaults(mean_estimator_memory_efficient=False)
+    parser.set_defaults(sigmoid_scaling=False)
+    parser.set_defaults(visualize_scaling=False)
+    parser.set_defaults(efficient_trace=False)
+    parser.set_defaults(collect_loop_statistic=False)
+    parser.set_defaults(tiled_training=False)
+    parser.set_defaults(test_tiling=False)
 
     args = parser.parse_args()
 
@@ -975,6 +1135,9 @@ def copy_option(args):
     delattr(new_args, 'render_camera_pos')
     delattr(new_args, 'render_t')
     delattr(new_args, 'mean_estimator_memory_efficient')
+    delattr(new_args, 'visualize_scaling')
+    delattr(new_args, 'visualize_ind')
+    delattr(new_args, 'test_tiling')
     return new_args
 
 def main_network(args):
@@ -1062,6 +1225,17 @@ def main_network(args):
 
     if args.mean_estimator_memory_efficient:
         assert not args.generate_timeline
+
+    if args.tiled_training:
+        global conv_padding
+        conv_padding = "VALID"
+        assert width % args.tiled_w == 0
+        assert height % args.tiled_h == 0
+        ntiles_w = width / args.tiled_w
+        ntiles_h = height / args.tiled_h
+    else:
+        ntiles_w = 1
+        ntiles_h = 1
 
     input_names, output_names, val_names, val_img_names, map_names, val_map_names, grad_names, val_grad_names = prepare_data_root(args.dataroot, use_weight_map=args.use_weight_map or args.gradient_loss_canny_weight, gradient_loss=args.gradient_loss)
     if args.test_training:
@@ -1152,7 +1326,34 @@ def main_network(args):
             print("sample count", shader_samples)
             feature_w = []
             color_inds = []
-            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection)
+            if args.tiled_training:
+                h_start = tf.placeholder(dtype=dtype, shape=())
+                w_start = tf.placeholder(dtype=dtype, shape=())
+                h_offset = height / ntiles_h + padding_offset
+                w_offset = width / ntiles_w + padding_offset
+                if args.is_train:
+                    feed_samples = None
+                else:
+                    # for inference, need to ensure that noise samples used within an image is the same
+                    feed_samples = [tf.placeholder(dtype=dtype, shape=[1, height+padding_offset, width+padding_offset]), tf.placeholder(dtype=dtype, shape=[1, height+padding_offset, width+padding_offset])]
+            elif args.test_tiling:
+                h_start = tf.placeholder(dtype=dtype, shape=())
+                #h_offset = tf.placeholder(dtype=dtype)
+                w_start = tf.placeholder(dtype=dtype, shape=())
+                #w_offset = tf.placeholder(dtype=dtype)
+                h_offset = height / 2 + padding_offset
+                w_offset = width / 2 + padding_offset
+                global conv_padding
+                conv_padding = "VALID"
+                #feed_samples = [numpy.random.normal(size=(1, height+padding_offset, width+padding_offset)), numpy.random.normal(size=(1, height+padding_offset, width+padding_offset))]
+                feed_samples = [tf.placeholder(dtype=dtype, shape=[1, height+padding_offset, width+padding_offset]), tf.placeholder(dtype=dtype, shape=[1, height+padding_offset, width+padding_offset])]
+            else:
+                h_start = 0
+                w_start = 0
+                h_offset = height
+                w_offset = width
+                feed_samples = None
+            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection, sigmoid_scaling=args.sigmoid_scaling, manual_features_only=args.manual_features_only, efficient_trace=args.efficient_trace, collect_loop_statistic=args.collect_loop_statistic, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=feed_samples, fov=args.fov)
             color_inds = color_inds[::-1]
             debug_input = input_to_network
 
@@ -1234,7 +1435,7 @@ def main_network(args):
                         ini_id = False
                 if args.add_initial_layers:
                     for nlayer in range(3):
-                        input_to_network = slim.conv2d(input_to_network, actual_initial_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(), scope='initial_'+str(nlayer), weights_regularizer=regularizer)
+                        input_to_network = slim.conv2d(input_to_network, actual_initial_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(), scope='initial_'+str(nlayer), weights_regularizer=regularizer, padding=conv_padding)
 
             if deconv_layers > 0:
                 if args.deconv:
@@ -1516,7 +1717,7 @@ def main_network(args):
     print("arriving before train branch")
 
     if args.is_train:
-        all=np.zeros(len(input_names), dtype=float)
+        all=np.zeros(int(time_vals.shape[0] * ntiles_w * ntiles_h), dtype=float)
 
         if read_data_from_file and args.preload and (not args.use_queue):
             input_images=[None]*len(input_names)
@@ -1566,17 +1767,20 @@ def main_network(args):
 
             cnt=0
 
-            permutation = np.random.permutation(len(input_names))
-            nupdates = len(input_names) if not args.use_batch else int(np.ceil(float(len(input_names)) / args.batch_size))
+            permutation = np.random.permutation(int(time_vals.shape[0] * ntiles_h * ntiles_w))
+            nupdates = permutation.shape[0] if not args.use_batch else int(np.ceil(float(time_vals.shape[0]) / args.batch_size))
 
             if args.finetune and epoch <= num_transition_epoch:
                 alpha_val = alpha_schedule[epoch-1]
 
             #for id in np.random.permutation(len(input_names)):
             for i in range(nupdates):
+                frame_idx = int(permutation[i] // (ntiles_w * ntiles_h))
+                tile_idx = int(permutation[i] % (ntiles_w * ntiles_h))
+
                 st=time.time()
                 start_id = i * args.batch_size
-                end_id = min(len(input_names), (i+1)*args.batch_size)
+                end_id = min(permutation.shape[0], (i+1)*args.batch_size)
 
                 if False:
                     run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
@@ -1587,9 +1791,9 @@ def main_network(args):
 
                 feed_dict={}
                 if args.use_weight_map or args.gradient_loss_canny_weight:
-                    feed_dict[weight_map] = np.expand_dims(read_name(map_names[permutation[i]], True), axis=0)
+                    feed_dict[weight_map] = np.expand_dims(read_name(map_names[frame_idx], True), axis=0)
                 if args.gradient_loss:
-                    grad_arr = read_name(grad_names[permutation[i]], True)
+                    grad_arr = read_name(grad_names[frame_idx], True)
                     feed_dict[canny_edge] = grad_arr[:, :, :, 0]
                     if args.grayscale_grad:
                         feed_dict[dx_ground] = grad_arr[:, :, :, 1:2]
@@ -1601,8 +1805,8 @@ def main_network(args):
                 if (not args.use_queue) and read_data_from_file:
                     if args.preload:
                         if not args.use_batch:
-                            input_image = input_images[permutation[i]]
-                            output_image = output_images[permutation[i]]
+                            input_image = input_images[frame_idx]
+                            output_image = output_images[frame_idx]
                             if input_image is None:
                                 continue
                         else:
@@ -1610,8 +1814,8 @@ def main_network(args):
                             output_image = output_images[permutation[start_id:end_id], :, :, :]
                     else:
                         if not args.use_batch:
-                            input_image = np.expand_dims(read_name(input_names[permutation[i]], args.is_npy, args.is_bin), axis=0)
-                            output_image = np.expand_dims(read_name(output_names[permutation[i]], False), axis=0)
+                            input_image = np.expand_dims(read_name(input_names[frame_idx], args.is_npy, args.is_bin), axis=0)
+                            output_image = np.expand_dims(read_name(output_names[frame_idx], False), axis=0)
                         else:
                             # TODO: should complete this logic
                             raise
@@ -1625,14 +1829,38 @@ def main_network(args):
                         printval = True
                     _,current=sess.run([opt,loss],feed_dict={alpha: alpha_val}, options=run_options, run_metadata=run_metadata)
                 else:
-                    camera_val = camera_pos_vals[permutation[i], :]
-                    feed_dict[camera_pos] = camera_val
-                    feed_dict[shader_time] = [time_vals[permutation[i]]]
-                    output_arr = np.expand_dims(read_name(output_names[permutation[i]], False), axis=0)
+                    output_arr = np.expand_dims(read_name(output_names[frame_idx], False), axis=0)
+                    #output_arr = numpy.ones([1, args.input_h, args.input_w, 3])
                     if train_from_queue:
                         output_arr = output_arr[..., ::-1]
+                    if args.tiled_training:
+                        # check if this tiled patch is all balck, if so skip this iter
+                        tile_h = tile_idx // ntiles_w
+                        tile_w  = tile_idx % ntiles_w
+                        output_patch = output_arr[:, int(tile_h*height/ntiles_h):int((tile_h+1)*height/ntiles_h), int(tile_w*width/ntiles_w):int((tile_w+1)*width/ntiles_w), :]
+                        #if numpy.sum(output_patch) == 0:
+                        # skip if less than 1% of pixels are nonzero
+                        if numpy.sum(output_patch > 0) < args.tiled_h * args.tiled_w * 3 / 100:
+                            continue
+                        output_arr = output_patch
+                        for key, value in feed_dict.items():
+                            if isinstance(value, numpy.ndarray) and len(value.shape) >= 3 and value.shape[1] == height and value.shape[2] == width:
+                                if len(value.shape) == 3:
+                                    tiled_value = value[:, int(tile_h*height/ntiles_h):int((tile_h+1)*height/ntiles_h), int(tile_w*width/ntiles_w):int((tile_w+1)*width/ntiles_w)]
+                                else:
+                                    tiled_value = value[:, int(tile_h*height/ntiles_h):int((tile_h+1)*height/ntiles_h), int(tile_w*width/ntiles_w):int((tile_w+1)*width/ntiles_w), :]
+                                feed_dict[key] = tiled_value
+                        feed_dict[h_start] = tile_h * height / ntiles_h - padding_offset / 2
+                        feed_dict[w_start] = tile_w * width / ntiles_w - padding_offset / 2
+
                     feed_dict[output] = output_arr
+
+                    camera_val = camera_pos_vals[frame_idx, :]
+                    feed_dict[camera_pos] = camera_val
+                    feed_dict[shader_time] = [time_vals[frame_idx]]
                     _,current =sess.run([opt,loss],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
+                    if numpy.isnan(current):
+                        current = 0
 
                 if args.learn_scale:
                     feature_val = sess.run(feature_w)
@@ -1740,6 +1968,8 @@ def main_network(args):
                 debug_dir = "%s/mean%d"%(args.name, args.estimator_samples)
                 debug_dir += '_test' if not args.test_training else '_train'
                 #debug_dir = "%s/mean%d"%('/localtmp/yuting', args.estimator_samples)
+            elif args.visualize_scaling:
+                debug_dir = args.name + '/scaled_features'
             else:
                 #debug_dir = "%s/debug"%args.name
                 debug_dir = args.name + '/' + ('test' if not args.test_training else 'train')
@@ -1790,6 +2020,12 @@ def main_network(args):
 </body>
 </html>""")
                     return
+                elif args.visualize_scaling:
+                    feed_dict = {camera_pos: camera_pos_vals[args.visualize_ind, :], shader_time: time_vals[args.visualize_ind:args.visualize_ind+1]}
+                    all_features = sess.run(debug_input, feed_dict=feed_dict)
+                    for i in range(all_features.shape[3]):
+                        cv2.imwrite("%s/%05d.png"%(debug_dir, i), all_features[0, :, :, i] * 255.0)
+                    return
                 else:
                     all_test = np.zeros(len(val_img_names), dtype=float)
                     all_grad = np.zeros(len(val_img_names), dtype=float)
@@ -1815,24 +2051,67 @@ def main_network(args):
                         #pctx.dump_next_step()
                         feed_dict[output] = output_ground
                         output_buffer = numpy.zeros(output_ground.shape)
+
                         st = time.time()
-                        if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
-                            nruns = args.estimator_samples
+                        if args.tiled_training:
+                            l2_loss_val = 0
+                            grad_loss_val = 0
+                            feed_dict[feed_samples[0]] = numpy.random.normal(size=(1, height+padding_offset, width+padding_offset))
+                            feed_dict[feed_samples[1]] = numpy.random.normal(size=(1, height+padding_offset, width+padding_offset))
+                            for tile_h in range(int(ntiles_h)):
+                                for tile_w in range(int(ntiles_w)):
+                                    tiled_feed_dict = {}
+                                    tiled_feed_dict[h_start] = tile_h * height / ntiles_h - padding_offset / ntiles_h
+                                    tiled_feed_dict[w_start] = tile_w * width / ntiles_w - padding_offset / ntiles_w
+                                    for key, value in feed_dict.items():
+                                        if isinstance(value, numpy.ndarray) and len(value.shape) >= 3 and value.shape[1] == height and value.shape[2] == width:
+                                            if len(value.shape) == 3:
+                                                tiled_value = value[:, int(tile_h*height/ntiles_h):int((tile_h+1)*height/ntiles_h), int(tile_w*width/ntiles_w):int((tile_w+1)*width/ntiles_w)]
+                                            else:
+                                                tiled_value = value[:, int(tile_h*height/ntiles_h):int((tile_h+1)*height/ntiles_h), int(tile_w*width/ntiles_w):int((tile_w+1)*width/ntiles_w), :]
+                                            tiled_feed_dict[key] = tiled_value
+                                        else:
+                                            tiled_feed_dict[key] = value
+                                    output_patch, l2_loss_patch, grad_loss_patch = sess.run([network, loss_l2, loss_add_term], feed_dict=tiled_feed_dict)
+                                    output_buffer[0, int(tile_h*height/2):int((tile_h+1)*height/2), int(tile_w*width/2):int((tile_w+1)*width/2), :] = output_patch[0, :, :, :]
+                                    l2_loss_val += l2_loss_patch
+                                    grad_loss_val += grad_loss_patch
+                            output_image = output_buffer
+                            l2_loss_val /= (ntiles_w * ntiles_h)
+                            grad_loss_val /= (ntiles_w * ntiles_h)
+                        elif args.test_tiling:
+                            output_image = numpy.empty(output_ground.shape)
+                            feed_dict[feed_samples[0]] = numpy.random.normal(size=(1, height+padding_offset, width+padding_offset))
+                            feed_dict[feed_samples[1]] = numpy.random.normal(size=(1, height+padding_offset, width+padding_offset))
+                            #feed_dict[feed_samples[0]] = numpy.pad(numpy.random.normal(size=(1, height, width)), ((0, 0), (padding_offset // 2, padding_offset // 2), (padding_offset // 2, padding_offset // 2)), 'constant', constant_values=0.0)
+                            #feed_dict[feed_samples[1]] = numpy.pad(numpy.random.normal(size=(1, height, width)), ((0, 0), (padding_offset // 2, padding_offset // 2), (padding_offset // 2, padding_offset // 2)), 'constant', constant_values=0.0)
+                            for tile_h in range(2):
+                                for tile_w in range(2):
+                                    feed_dict[h_start] = tile_h * height / 2 - padding_offset / 2
+                                    feed_dict[w_start] = tile_w * width / 2 - padding_offset / 2
+                                    output_tile = sess.run(network, feed_dict=feed_dict)
+                                    output_image[0, int(tile_h*height/2):int((tile_h+1)*height/2), int(tile_w*width/2):int((tile_w+1)*width/2), :] = output_tile[0, :, :, :]
+                            cv2.imwrite('test4.png', numpy.uint8(numpy.clip(output_image[0, :, :, :], 0.0, 1.0) * 255.0))
+                            return
                         else:
-                            nruns = 1
-                        for k in range(nruns):
-                            output_image, l2_loss_val, grad_loss_val = sess.run([network, loss_l2, loss_add_term], options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
                             if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
-                                output_buffer += output_image[:, :, :, ::-1]
+                                nruns = args.estimator_samples
+                            else:
+                                nruns = 1
+                            for k in range(nruns):
+                                output_image, l2_loss_val, grad_loss_val = sess.run([network, loss_l2, loss_add_term], options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
+                                if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
+                                    output_buffer += output_image[:, :, :, ::-1]
+                            st2 = time.time()
+                            print("rough time estimate:", st2 - st)
+                            #pctx.profiler.profile_operations(options=opts)
+                            if train_from_queue or args.mean_estimator:
+                                output_image = output_image[:, :, :, ::-1]
+                            print("output_image swap axis")
+                            if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
+                                output_buffer /= args.estimator_samples
+                                output_image[:] = output_buffer[:]
                         st2 = time.time()
-                        print("rough time estimate:", st2 - st)
-                        #pctx.profiler.profile_operations(options=opts)
-                        if train_from_queue or args.mean_estimator:
-                            output_image = output_image[:, :, :, ::-1]
-                        print("output_image swap axis")
-                        if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
-                            output_buffer /= args.estimator_samples
-                            output_image[:] = output_buffer[:]
                         loss_val = np.mean((output_image - output_ground) ** 2) * 255.0 * 255.0
                         print("loss", loss_val, l2_loss_val * 255.0 * 255.0)
                         all_test[i] = loss_val
@@ -2097,7 +2376,7 @@ def main_network(args):
     sess.close()
 
     if not args.is_train:
-        check_command = 'source activate pytorch36 && CUDA_VISIBLE_DEVICES=2, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir + ' source activate tensorflow35'
+        check_command = 'source activate pytorch36 && CUDA_VISIBLE_DEVICES=2, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir + ' && source activate tensorflow35'
         #check_command = 'python plot_clip_weights.py ' + test_dirname + ' ' + grounddir
         subprocess.check_output(check_command, shell=True)
         #os.system('source activate pytorch36 && CUDA_VISIBLE_DEVICES=2, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir)
