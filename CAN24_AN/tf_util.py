@@ -4,6 +4,8 @@ import numpy as np
 import numpy
 import math
 
+dtype = tf.float32
+
 #select = lambda a, b, c: a*b + (1-a)*c
 
 np_perm = numpy.array([151, 160, 137, 91, 90, 15, 131, 13, 201, 95, 96, 53, 194, 233, 7, 225, 140, 36, 103, 30, 69, 142, 8, 99,
@@ -41,22 +43,50 @@ def new_mul(x, y):
             return 0.0
     except:
         pass
+    if x.dtype == bool and y.dtype == bool:
+        return tf.logical_and(x, y)
     return tf.multiply(x, y)
+
+def new_add(x, y):
+    if isinstance(x, tf.Tensor) and x.dtype == bool:
+        x = tf.cast(x, dtype)
+    if isinstance(y, tf.Tensor) and y.dtype == bool:
+        y = tf.cast(y, dtype)
+    if isinstance(x, bool):
+        x = float(x)
+    if isinstance(y, bool):
+        y = float(y)
+    return tf.add(x, y)
 
 tf.Tensor.__mul__ = new_mul
 tf.Tensor.__rmul__ = new_mul
+tf.Tensor.__add__ = new_add
+tf.Tensor.__radd__ = new_add
 
 def select_nosmooth(a, b, c):
-    if isinstance(a, tf.Tensor):
-        if isinstance(b, (int, float)):
-            b = b * tf.ones_like(a)
-        if isinstance(c, (int, float)):
-            c = c * tf.ones_like(a)
+
+    all_scalar = True
+    base_tensor = None
+    for tensor in [a, b, c]:
+        if not isinstance(tensor, (int, float)):
+            all_scalar = False
+            base_tensor = tensor
+            break
+    if all_scalar:
+        return b if a else c
+
+    if isinstance(b, (int, float)):
         if b == 0.0:
-            b = tf.zeros_like(a)
+            b = tf.zeros_like(base_tensor, dtype=dtype)
+        else:
+            b = b * tf.ones_like(base_tensor, dtype=dtype)
+    if isinstance(c, (int, float)):
         if c == 0.0:
-            c = tf.zeros_like(a)
+            c = tf.zeros_like(base_tensor, dtype=dtype)
+        else:
+            c = c * tf.ones_like(base_tensor, dtype=dtype)
     return tf.where(tf.cast(a, bool), b, c)
+
 select = select_nosmooth
 
 def simplex_noise(a0, a1, a2, a3, a4, a5, x, y):
@@ -69,16 +99,20 @@ def tf_np_wrapper(func):
     def f(x, y=None):
         if func == 'sign_up':
             if isinstance(x, tf.Tensor):
-                return 2.0 * tf.cast(x >= 0.0, tf.float32) - 1.0
+                return 2.0 * tf.cast(x >= 0.0, x.dtype) - 1.0
             else:
                 return 2.0 * float(x >= 0.0) - 1.0
         elif func == 'sign_down':
             if isinstance(x, tf.Tensor):
-                return 2.0 * tf.cast(x > 0.0, tf.float32) - 1.0
+                return 2.0 * tf.cast(x > 0.0, x.dtype) - 1.0
             else:
                 return 2.0 * float(x > 0.0) - 1.0
         elif func == 'random_normal':
-            return tf.random_normal(tf.shape(x))
+            return tf.random_normal(tf.shape(x), dtype=x.dtype)
+            #return 0.0
+        #elif func == 'sqrt':
+            #ans = tf.sqrt(x)
+            #return tf.where(tf.is_nan(ans), tf.zeros_like(ans), ans)
 
         if isinstance(x, tf.Tensor) or isinstance(y, tf.Tensor):
             if func == 'fmod':
