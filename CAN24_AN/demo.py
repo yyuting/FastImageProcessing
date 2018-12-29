@@ -39,7 +39,7 @@ less_aggresive_ini = False
 conv_padding = "SAME"
 padding_offset = 32
 
-def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True, sigmoid_scaling=False, manual_features_only=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular'):
+def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True, sigmoid_scaling=False, manual_features_only=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0):
     # 2x_1sample on margo
     #camera_pos = np.load('/localtmp/yuting/out_2x1_manual_carft/train.npy')[0, :]
 
@@ -124,7 +124,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
 
     #samples = [all_features[-2, :, :], all_features[-1, :, :]]
 
-    features, vec_output, manual_features = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, geometry=geometry, return_vec_output=True, compiler_module=compiler_module, manual_features_only=manual_features_only, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=samples, fov=fov)
+    features, vec_output, manual_features = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, geometry=geometry, return_vec_output=True, compiler_module=compiler_module, manual_features_only=manual_features_only, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=samples, fov=fov, camera_pos_velocity=camera_pos_velocity, t_sigma=t_sigma)
 
     if len(vec_output) > 3:
         loop_statistic = vec_output[3:]
@@ -294,7 +294,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
     #numpy.save('valid_inds.npy', valid_inds)
     #return features
 
-def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None, geometry='plane', zero_samples=False, debug=[], extra_args=[None], render_g=False, manual_features_only=False, fov='regular', h_start=0, h_offset=height, w_start=0, w_offset=width):
+def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None, geometry='plane', zero_samples=False, debug=[], extra_args=[None], render_g=False, manual_features_only=False, fov='regular', h_start=0, h_offset=height, w_start=0, w_offset=width, camera_pos_velocity=None, t_sigma=1/60.0):
     #vec_output_len = compiler_module.vec_output_len
     assert compiler_module is not None
     #if shader_name == 'zigzag':
@@ -307,10 +307,21 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     #    compiler_problem_full_name = os.path.abspath('../../global_opt/proj/apps/compiler_problem')
     #    compiler_module = importlib.import_module(compiler_problem_full_name)
 
+    #if geometry != 'none':
+    #    features_len = compiler_module.f_log_intermediate_len + 7
+    #else:
+    #    features_len = compiler_module.f_log_intermediate_len + 2
+
     if geometry != 'none':
-        features_len = compiler_module.f_log_intermediate_len + 7
+        features_len_add = 7
     else:
-        features_len = compiler_module.f_log_intermediate_len + 2
+        features_len_add = 2
+
+    if camera_pos_velocity is not None:
+        features_len_add += 7
+
+    features_len = compiler_module.f_log_intermediate_len + features_len_add
+
     vec_output_len = compiler_module.vec_output_len
 
     if manual_features_only:
@@ -356,7 +367,9 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
         print("creating random samples")
         sample1 = tf.random_normal(tf.shape(xv), dtype=dtype)
         sample2 = tf.random_normal(tf.shape(xv), dtype=dtype)
+        sample3 = tf.random_normal(tf.shape(xv), dtype=dtype)
     else:
+        sample3 = 0.0
         if isinstance(samples[0], numpy.ndarray) and isinstance(samples[1], numpy.ndarray):
             sample1 = tf.constant(samples[0], dtype=dtype)
             sample2 = tf.constant(samples[1], dtype=dtype)
@@ -380,29 +393,40 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
         #    sample2 = samples[1].astype(np.float64)
 
     if render_sigma is None:
-        render_sigma = [0.5, 0.5, 0.0]
+        render_sigma = [0.5, 0.5, t_sigma]
     if not zero_samples:
         print("using random samples")
         vector3 = [tensor_x0 + render_sigma[0] * sample1, tensor_x1 + render_sigma[1] * sample2, tensor_x2]
+        if camera_pos_velocity is not None:
+            vector3 = [vector3[0], vector3[1], vector3[2] + render_sigma[2] * sample3, render_sigma[2] * sample3]
     else:
         vector3 = [tensor_x0, tensor_x1, tensor_x2]
         print("using zero samples")
     #vector3 = [tensor_x0, tensor_x1, tensor_x2]
     f_log_intermediate[0] = shader_time
     f_log_intermediate[1] = camera_pos
-    get_shader(vector3, f_log_intermediate, f_log_intermediate_subset, camera_pos, features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output, compiler_module=compiler_module, geometry=geometry, debug=debug, extra_args=extra_args, render_g=render_g, manual_features_only=manual_features_only, fov=fov)
+    get_shader(vector3, f_log_intermediate, f_log_intermediate_subset, camera_pos, features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output, compiler_module=compiler_module, geometry=geometry, debug=debug, extra_args=extra_args, render_g=render_g, manual_features_only=manual_features_only, fov=fov, camera_pos_velocity=camera_pos_velocity, features_len_add=features_len_add)
 
     f_log_intermediate[features_len-2] = sample1
     f_log_intermediate[features_len-1] = sample2
+
+    if camera_pos_velocity is not None:
+        f_log_intermediate[features_len-3] = sample3
+        f_log_intermediate[features_len-4] = camera_pos_velocity[0] * tf.cast(tf.fill(tf.shape(xv), 1.0), dtype)
+        f_log_intermediate[features_len-5] = camera_pos_velocity[1] * tf.cast(tf.fill(tf.shape(xv), 1.0), dtype)
+        f_log_intermediate[features_len-6] = camera_pos_velocity[2] * tf.cast(tf.fill(tf.shape(xv), 1.0), dtype)
+        f_log_intermediate[features_len-7] = camera_pos_velocity[3] * tf.cast(tf.fill(tf.shape(xv), 1.0), dtype)
+        f_log_intermediate[features_len-8] = camera_pos_velocity[4] * tf.cast(tf.fill(tf.shape(xv), 1.0), dtype)
+        f_log_intermediate[features_len-9] = camera_pos_velocity[5] * tf.cast(tf.fill(tf.shape(xv), 1.0), dtype)
 
     if return_vec_output:
         return f_log_intermediate, vec_output, f_log_intermediate_subset
     else:
         return f_log_intermediate
 
-def get_shader(x, f_log_intermediate, f_log_intermediate_subset, camera_pos, features_len, shader_name='zigzag', color_inds=None, vec_output=None, compiler_module=None, geometry='plane', debug=[], extra_args=[None], render_g=False, manual_features_only=False, fov='regular'):
+def get_shader(x, f_log_intermediate, f_log_intermediate_subset, camera_pos, features_len, shader_name='zigzag', color_inds=None, vec_output=None, compiler_module=None, geometry='plane', debug=[], extra_args=[None], render_g=False, manual_features_only=False, fov='regular', camera_pos_velocity=None, features_len_add=7):
     assert compiler_module is not None
-    features = get_features(x, camera_pos, geometry=geometry, debug=debug, extra_args=extra_args, fov=fov)
+    features = get_features(x, camera_pos, geometry=geometry, debug=debug, extra_args=extra_args, fov=fov, camera_pos_velocity=camera_pos_velocity)
     if vec_output is None:
         vec_output = [None] * 3
 
@@ -414,25 +438,7 @@ def get_shader(x, f_log_intermediate, f_log_intermediate_subset, camera_pos, fea
             f_log_intermediate_subset[-1] = extra_args[0]
         elif geometry != 'none':
             raise
-    #if shader_name == 'zigzag':
-    #    zigzag_f(features, f_log_intermediate)
-    #elif shader_name == 'sin_quadratic':
-    #    sin_quadratic_f(features, f_log_intermediate)
-    #elif shader_name == 'bricks':
-    #    bricks_f(features, f_log_intermediate)
-    #elif shader_name == 'compiler_problem':
-    #    compiler_module.f(features, f_log_intermediate, vec_output)
-    #else:
-    #    raise
 
-    #compiler_module.f(features, f_log_intermediate, vec_output)
-
-    #if color_inds is None:
-    #    color_features = None
-    #else:
-    #    color_features = [f_log_intermediate[i] for i in range(len(f_log_intermediate)) if i in color_inds]
-
-    #with tf.control_dependencies(vec_output):
     if True:
         with tf.variable_scope("auxiliary"):
             if geometry != 'none':
@@ -448,17 +454,25 @@ def get_shader(x, f_log_intermediate, f_log_intermediate_subset, camera_pos, fea
                     v_ind = 9
                 else:
                     raise
-                features_neg_x = get_features([x[0]-h, x[1], x[2]], camera_pos, geometry=geometry, fov=fov)
-                features_pos_x = get_features([x[0]+h, x[1], x[2]], camera_pos, geometry=geometry, fov=fov)
-                f_log_intermediate[features_len-7] = (features_pos_x[u_ind] - features_neg_x[u_ind]) / (2 * h)
-                f_log_intermediate[features_len-6] = (features_pos_x[v_ind] - features_neg_x[v_ind]) / (2 * h)
 
-                features_neg_y = get_features([x[0], x[1]-h, x[2]], camera_pos, geometry=geometry, fov=fov)
-                features_pos_y = get_features([x[0], x[1]+h, x[2]], camera_pos, geometry=geometry, fov=fov)
-                f_log_intermediate[features_len-5] = (features_pos_y[u_ind] - features_neg_y[u_ind]) / (2 * h)
-                f_log_intermediate[features_len-4] = (features_pos_y[v_ind] - features_neg_y[v_ind]) / (2 * h)
+                new_x = x[:]
+                new_x[0] = x[0] - h
+                features_neg_x = get_features(new_x, camera_pos, geometry=geometry, fov=fov)
+                new_x[0] = x[0] + h
+                features_pos_x = get_features(new_x, camera_pos, geometry=geometry, fov=fov)
+                f_log_intermediate[features_len-features_len_add] = (features_pos_x[u_ind] - features_neg_x[u_ind]) / (2 * h)
+                f_log_intermediate[features_len-features_len_add+1] = (features_pos_x[v_ind] - features_neg_x[v_ind]) / (2 * h)
 
-                f_log_intermediate[features_len-3] = f_log_intermediate[features_len-7] * f_log_intermediate[features_len-4] - f_log_intermediate[features_len-6] * f_log_intermediate[features_len-5]
+                new_x = x[:]
+                new_x[1] = x[1] - h
+                features_neg_y = get_features(new_x, camera_pos, geometry=geometry, fov=fov)
+                new_x[1] = x[1] + h
+                features_pos_y = get_features(new_x, camera_pos, geometry=geometry, fov=fov)
+                f_log_intermediate[features_len-features_len_add+2] = (features_pos_y[u_ind] - features_neg_y[u_ind]) / (2 * h)
+                f_log_intermediate[features_len-features_len_add+3] = (features_pos_y[v_ind] - features_neg_y[v_ind]) / (2 * h)
+
+                f_log_intermediate[features_len-features_len_add+4] = f_log_intermediate[features_len-features_len_add] * f_log_intermediate[features_len-features_len_add+3] - f_log_intermediate[features_len-features_len_add+1] * f_log_intermediate[features_len-features_len_add+2]
+
 
     if not render_g:
         if not manual_features_only:
@@ -487,7 +501,7 @@ def get_shader(x, f_log_intermediate, f_log_intermediate_subset, camera_pos, fea
 
     return
 
-def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None], fov='regular'):
+def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None], fov='regular', camera_pos_velocity=None):
     if fov == 'regular':
         ray_dir = [x[0] - width / 2, x[1] + 1, width / 2]
         print("use regular fov (90 degrees horizontally)")
@@ -496,19 +510,31 @@ def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None], f
         print("use small fov (60 degrees horizontally)")
     else:
         raise
-    ray_origin = [camera_pos[0], camera_pos[1], camera_pos[2]]
+
+    if camera_pos_velocity is None:
+        ray_origin = [camera_pos[0], camera_pos[1], camera_pos[2]]
+        ang1 = camera_pos[3]
+        ang2 = camera_pos[4]
+        ang3 = camera_pos[5]
+    else:
+        ray_origin = [camera_pos[0] + camera_pos_velocity[0] * x[3],
+                      camera_pos[1] + camera_pos_velocity[1] * x[3],
+                      camera_pos[2] + camera_pos_velocity[2] * x[3]]
+        ang1 = camera_pos[3] + camera_pos_velocity[3] * x[3]
+        ang2 = camera_pos[4] + camera_pos_velocity[4] * x[3]
+        ang3 = camera_pos[5] + camera_pos_velocity[5] * x[3]
 
     ray_dir_norm = tf.sqrt(ray_dir[0] **2 + ray_dir[1] ** 2 + ray_dir[2] ** 2)
     ray_dir[0] /= ray_dir_norm
     ray_dir[1] /= ray_dir_norm
     ray_dir[2] /= ray_dir_norm
 
-    sin1 = tf.sin(camera_pos[3])
-    cos1 = tf.cos(camera_pos[3])
-    sin2 = tf.sin(camera_pos[4])
-    cos2 = tf.cos(camera_pos[4])
-    sin3 = tf.sin(camera_pos[5])
-    cos3 = tf.cos(camera_pos[5])
+    sin1 = tf.sin(ang1)
+    cos1 = tf.cos(ang1)
+    sin2 = tf.sin(ang2)
+    cos2 = tf.cos(ang2)
+    sin3 = tf.sin(ang3)
+    cos3 = tf.cos(ang3)
 
     ray_dir_p = [cos2 * cos3 * ray_dir[0] + (-cos1 * sin3 + sin1 * sin2 * cos3) * ray_dir[1] + (sin1 * sin3 + cos1 * sin2 * cos3) * ray_dir[2],
                  cos2 * sin3 * ray_dir[0] + (cos1 * cos3 + sin1 * sin2 * sin3) * ray_dir[1] + (-sin1 * cos3 + cos1 * sin2 * sin3) * ray_dir[2],
@@ -1040,6 +1066,7 @@ def main():
     parser.add_argument('--tiled_h', dest='tiled_h', type=int, default=320, help='default height for tiles if using tiled training')
     parser.add_argument('--test_tiling', dest='test_tiling', action='store_true', help='debug mode to test tiling')
     parser.add_argument('--fov', dest='fov', default='regular', help='specified the camera field of view')
+    parser.add_argument('--motion_blur', dest='motion_blur', action='store_true', help='if specified, input argument include velocity and angular velocity for camera pose')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -1106,6 +1133,7 @@ def main():
     parser.set_defaults(collect_loop_statistic=False)
     parser.set_defaults(tiled_training=False)
     parser.set_defaults(test_tiling=False)
+    parser.set_defaults(motion_blur=False)
 
     args = parser.parse_args()
 
@@ -1305,6 +1333,10 @@ def main_network(args):
         output=tf.placeholder(tf.float32,shape=[None,None,None,3])
         camera_pos = tf.placeholder(dtype, shape=6)
         shader_time = tf.placeholder(dtype, shape=1)
+        if args.motion_blur:
+            camera_pos_velocity = tf.placeholder(dtype, shape=6)
+        else:
+            camera_pos_velocity = None
         if args.full_resolution:
             width *= args.upsample_scale
             height *= args.upsample_scale
@@ -1353,7 +1385,7 @@ def main_network(args):
                 h_offset = height
                 w_offset = width
                 feed_samples = None
-            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection, sigmoid_scaling=args.sigmoid_scaling, manual_features_only=args.manual_features_only, efficient_trace=args.efficient_trace, collect_loop_statistic=args.collect_loop_statistic, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=feed_samples, fov=args.fov)
+            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection, sigmoid_scaling=args.sigmoid_scaling, manual_features_only=args.manual_features_only, efficient_trace=args.efficient_trace, collect_loop_statistic=args.collect_loop_statistic, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=feed_samples, fov=args.fov, camera_pos_velocity=camera_pos_velocity)
             color_inds = color_inds[::-1]
             debug_input = input_to_network
 
