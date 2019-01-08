@@ -21,6 +21,8 @@ import importlib.util
 import subprocess
 import shutil
 from tf_util import *
+import json
+import read_timeline
 
 allowed_dtypes = ['float64', 'float32', 'uint8']
 no_L1_reg_other_layers = True
@@ -39,7 +41,7 @@ less_aggresive_ini = False
 conv_padding = "SAME"
 padding_offset = 32
 
-def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True, sigmoid_scaling=False, manual_features_only=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0):
+def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True, sigmoid_scaling=False, manual_features_only=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, zero_samples=False, render_fix_spatial_sample=False, render_fix_temporal_sample=False, spatial_samples=None, temporal_samples=None):
     # 2x_1sample on margo
     #camera_pos = np.load('/localtmp/yuting/out_2x1_manual_carft/train.npy')[0, :]
 
@@ -72,7 +74,10 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
         elif shader_name == 'fire':
             shader_args = ' render_fire ' + geometry + ' spheres '
         elif shader_name == 'marble':
-            shader_args = ' render_marble ' + geometry + ' ripples '
+            if camera_pos_velocity is not None:
+                shader_args = ' render_marble ' + geometry + ' ripples_still '
+            else:
+                shader_args = ' render_marble ' + geometry + ' ripples '
         elif shader_name == 'mandelbulb':
             shader_args = ' render_mandelbulb ' + geometry + ' none'
         elif shader_name == 'wood':
@@ -83,6 +88,8 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             shader_args = ' render_primitives_aliasing ' + geometry + ' none'
         elif shader_name == 'trippy_heart':
             shader_args = ' render_trippy_heart ' + geometry + ' none'
+        elif shader_name == 'oceanic':
+            shader_args = ' render_oceanic ' + geometry + ' none'
 
         render_util_dir = os.path.abspath('../../global_opt/proj/apps')
         render_single_full_name = os.path.abspath(os.path.join(render_util_dir, 'render_single.py'))
@@ -95,6 +102,20 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             render_single_cmd = render_single_cmd + ' --log_intermediates_subset_level 1'
         if collect_loop_statistic:
             render_single_cmd = render_single_cmd + ' --collect_loop_statistic'
+        if first_last_only:
+            render_single_cmd = render_single_cmd + ' --first_last_only'
+        if last_only:
+            assert not first_last_only
+            render_single_cmd = render_single_cmd + ' --last_only'
+        if subsample_loops > 0:
+            assert not first_last_only
+            assert not last_only
+            render_single_cmd = render_single_cmd + ' --subsample_loops ' + str(subsample_loops)
+        if last_n > 0:
+            assert not first_last_only
+            assert not last_only
+            assert subsample_loops < 0
+            render_single_cmd = render_single_cmd + ' --last_n ' + str(last_n)
         entire_cmd = 'cd ' + render_util_dir + ' && ' + render_single_cmd + ' && cd ' + cwd
         ans = os.system(entire_cmd)
         #ans = subprocess.call('cd ' + render_util_dir + ' && source activate py36 && python ' + render_single_full_name + ' out ' + shader_args + ' --is-tf --code-only --log-intermediates && source activate tensorflow35 && cd ' + cwd)
@@ -124,7 +145,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
 
     #samples = [all_features[-2, :, :], all_features[-1, :, :]]
 
-    features, vec_output, manual_features = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, geometry=geometry, return_vec_output=True, compiler_module=compiler_module, manual_features_only=manual_features_only, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=samples, fov=fov, camera_pos_velocity=camera_pos_velocity, t_sigma=t_sigma)
+    features, vec_output, manual_features = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, geometry=geometry, return_vec_output=True, compiler_module=compiler_module, manual_features_only=manual_features_only, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=samples, fov=fov, camera_pos_velocity=camera_pos_velocity, t_sigma=t_sigma, zero_samples=zero_samples, render_fix_spatial_sample=render_fix_spatial_sample, render_fix_temporal_sample=render_fix_temporal_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples)
 
     if len(vec_output) > 3:
         loop_statistic = vec_output[3:]
@@ -294,7 +315,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
     #numpy.save('valid_inds.npy', valid_inds)
     #return features
 
-def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None, geometry='plane', zero_samples=False, debug=[], extra_args=[None], render_g=False, manual_features_only=False, fov='regular', h_start=0, h_offset=height, w_start=0, w_offset=width, camera_pos_velocity=None, t_sigma=1/60.0):
+def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None, geometry='plane', zero_samples=False, debug=[], extra_args=[None], render_g=False, manual_features_only=False, fov='regular', h_start=0, h_offset=height, w_start=0, w_offset=width, camera_pos_velocity=None, t_sigma=1/60.0, render_fix_spatial_sample=False, render_fix_temporal_sample=False, spatial_samples=None, temporal_samples=None):
     #vec_output_len = compiler_module.vec_output_len
     assert compiler_module is not None
     #if shader_name == 'zigzag':
@@ -319,6 +340,10 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
 
     if camera_pos_velocity is not None:
         features_len_add += 7
+        if fov == 'regular':
+            print("creating dx/dt, dy/dt")
+            # marble case
+            features_len_add += 2
 
     features_len = compiler_module.f_log_intermediate_len + features_len_add
 
@@ -328,6 +353,9 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
         manual_features_len = compiler_module.f_log_intermediate_subset_len
         if geometry != 'none':
             manual_features_len += 1
+        if camera_pos_velocity is not None:
+            manual_features_len += 6
+            motion_start = compiler_module.f_log_intermediate_subset_len
         f_log_intermediate_subset = [None] * manual_features_len
     else:
         f_log_intermediate_subset = []
@@ -396,12 +424,23 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
         render_sigma = [0.5, 0.5, t_sigma]
     if not zero_samples:
         print("using random samples")
+
+        if render_fix_spatial_sample and spatial_samples is not None:
+            print("fix spatial samples")
+            sample1 = tf.constant(spatial_samples[0], dtype=dtype)
+            sample2 = tf.constant(spatial_samples[1], dtype=dtype)
+        if render_fix_temporal_sample and temporal_samples is not None:
+            print("fix temporal samples")
+            sample3 = tf.constant(temporal_samples[0], dtype=dtype)
+
         vector3 = [tensor_x0 + render_sigma[0] * sample1, tensor_x1 + render_sigma[1] * sample2, tensor_x2]
         if camera_pos_velocity is not None:
             vector3 = [vector3[0], vector3[1], vector3[2] + render_sigma[2] * sample3, render_sigma[2] * sample3]
     else:
         vector3 = [tensor_x0, tensor_x1, tensor_x2]
         print("using zero samples")
+        if camera_pos_velocity is not None:
+            vector3 = [vector3[0], vector3[1], vector3[2] + render_sigma[2] * sample3, 0.0]
     #vector3 = [tensor_x0, tensor_x1, tensor_x2]
     f_log_intermediate[0] = shader_time
     f_log_intermediate[1] = camera_pos
@@ -418,6 +457,13 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
         f_log_intermediate[features_len-7] = camera_pos_velocity[3] * tf.cast(tf.fill(tf.shape(xv), 1.0), dtype)
         f_log_intermediate[features_len-8] = camera_pos_velocity[4] * tf.cast(tf.fill(tf.shape(xv), 1.0), dtype)
         f_log_intermediate[features_len-9] = camera_pos_velocity[5] * tf.cast(tf.fill(tf.shape(xv), 1.0), dtype)
+        if manual_features_only:
+            f_log_intermediate_subset[motion_start  ] = f_log_intermediate[features_len-4]
+            f_log_intermediate_subset[motion_start+1] = f_log_intermediate[features_len-5]
+            f_log_intermediate_subset[motion_start+2] = f_log_intermediate[features_len-6]
+            f_log_intermediate_subset[motion_start+3] = f_log_intermediate[features_len-7]
+            f_log_intermediate_subset[motion_start+4] = f_log_intermediate[features_len-8]
+            f_log_intermediate_subset[motion_start+5] = f_log_intermediate[features_len-9]
 
     if return_vec_output:
         return f_log_intermediate, vec_output, f_log_intermediate_subset
@@ -426,7 +472,8 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
 
 def get_shader(x, f_log_intermediate, f_log_intermediate_subset, camera_pos, features_len, shader_name='zigzag', color_inds=None, vec_output=None, compiler_module=None, geometry='plane', debug=[], extra_args=[None], render_g=False, manual_features_only=False, fov='regular', camera_pos_velocity=None, features_len_add=7):
     assert compiler_module is not None
-    features = get_features(x, camera_pos, geometry=geometry, debug=debug, extra_args=extra_args, fov=fov, camera_pos_velocity=camera_pos_velocity)
+    features_dt = []
+    features = get_features(x, camera_pos, geometry=geometry, debug=debug, extra_args=extra_args, fov=fov, camera_pos_velocity=camera_pos_velocity, features_dt=features_dt)
     if vec_output is None:
         vec_output = [None] * 3
 
@@ -441,6 +488,7 @@ def get_shader(x, f_log_intermediate, f_log_intermediate_subset, camera_pos, fea
 
     if True:
         with tf.variable_scope("auxiliary"):
+
             if geometry != 'none':
                 if not render_g:
                     h = 1e-4
@@ -473,6 +521,9 @@ def get_shader(x, f_log_intermediate, f_log_intermediate_subset, camera_pos, fea
 
                 f_log_intermediate[features_len-features_len_add+4] = f_log_intermediate[features_len-features_len_add] * f_log_intermediate[features_len-features_len_add+3] - f_log_intermediate[features_len-features_len_add+1] * f_log_intermediate[features_len-features_len_add+2]
 
+            if camera_pos_velocity is not None and geometry == 'plane':
+                f_log_intermediate[features_len-10] = features_dt[0]
+                f_log_intermediate[features_len-11] = features_dt[1]
 
     if not render_g:
         if not manual_features_only:
@@ -501,7 +552,7 @@ def get_shader(x, f_log_intermediate, f_log_intermediate_subset, camera_pos, fea
 
     return
 
-def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None], fov='regular', camera_pos_velocity=None):
+def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None], fov='regular', camera_pos_velocity=None, features_dt=[]):
     if fov == 'regular':
         ray_dir = [x[0] - width / 2, x[1] + 1, width / 2]
         print("use regular fov (90 degrees horizontally)")
@@ -648,6 +699,39 @@ def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None], f
         features[4] = ray_origin[0] * tf.constant(1.0, dtype=dtype, shape=x[0].shape)
         features[5] = ray_origin[1] * tf.constant(1.0, dtype=dtype, shape=x[0].shape)
         features[6] = ray_origin[2] * tf.constant(1.0, dtype=dtype, shape=x[0].shape)
+
+    if camera_pos_velocity is not None and geometry == 'plane' and fov == 'regular':
+        # only for marble case
+
+        h = 1e-4
+
+        ray_dir_new = [t_ray * ray_dir_p[0] - h * camera_pos_velocity[0],
+                       t_ray * ray_dir_p[1] - h * camera_pos_velocity[1],
+                       t_ray * ray_dir_p[2] - h * camera_pos_velocity[2]]
+
+        new_ang1 = ang1 + h * camera_pos_velocity[3]
+        new_ang2 = ang2 + h * camera_pos_velocity[4]
+        new_ang3 = ang3 + h * camera_pos_velocity[5]
+
+        sin1 = tf.sin(new_ang1)
+        cos1 = tf.cos(new_ang1)
+        sin2 = tf.sin(new_ang2)
+        cos2 = tf.cos(new_ang2)
+        sin3 = tf.sin(new_ang3)
+        cos3 = tf.cos(new_ang3)
+
+        ray_dir_p_back = [cos2 * cos3 * ray_dir_new[0] + cos2 * sin3 * ray_dir_new[1] -sin2 * ray_dir_new[2],
+                          (-cos1 * sin3 + sin1 * sin2 * cos3) * ray_dir_new[0] + (cos1 * cos3 + sin1 * sin2 * sin3) * ray_dir_new[1] + sin1 * cos2 * ray_dir_new[2],
+                          (sin1 * sin3 + cos1 * sin2 * cos3) * ray_dir_new[0] + (-sin1 * cos3 + cos1 * sin2 * sin3) * ray_dir_new[1] + cos1 * cos2 * ray_dir_new[2]]
+
+        pix_coord_x = ray_dir_p_back[0] / ray_dir_p_back[2] * width / 2 + width / 2
+        pix_coord_y = ray_dir_p_back[1] / ray_dir_p_back[2] * width / 2 - 1
+
+        numerical_dx_dt = (pix_coord_x - x[0]) / h
+        numerical_dy_dt = (pix_coord_y - x[1]) / h
+        features_dt.append(numerical_dx_dt)
+        features_dt.append(numerical_dy_dt)
+
     return features
 
 def solve_quadric(quadric, ray_origin, ray_dir_p, features, debug=[]):
@@ -728,7 +812,7 @@ def solve_quadric(quadric, ray_origin, ray_dir_p, features, debug=[]):
 def image_gradients(image):
   """
   Copied from https://github.com/tensorflow/tensorflow/blob/r1.8/tensorflow/python/ops/image_ops_impl.py
-  it's a hack only because we're haven't upgraded tensorflow
+  it's a hack only because we haven't upgraded tensorflow
   Returns image gradients (dy, dx) for each color channel.
   Both output tensors have the same shape as the input: [batch_size, h, w,
   d]. The gradient values are organized so that [I(x+1, y) - I(x, y)] is in
@@ -1040,6 +1124,7 @@ def main():
     parser.add_argument('--render_only', dest='render_only', action='store_true', help='if specified, render using given camera pos, does not calculate loss')
     parser.add_argument('--render_camera_pos', dest='render_camera_pos', default='camera_pos.npy', help='used to render result')
     parser.add_argument('--render_t', dest='render_t', default='render_t.npy', help='used to render output')
+    parser.add_argument('--render_camera_pos_velocity', dest='render_camera_pos_velocity', default='camera_pos_velocity.npy', help='used for render result')
     parser.add_argument('--gradient_loss', dest='gradient_loss', action='store_true', help='if specified, also use gradient at canny edge regions as a loss term')
     parser.add_argument('--normalize_grad', dest='normalize_grad', action='store_true', help='if specified, use normalized gradient as loss')
     parser.add_argument('--grayscale_grad', dest='grayscale_grad', action='store_true', help='if specified, use grayscale gradient as loss')
@@ -1067,6 +1152,12 @@ def main():
     parser.add_argument('--test_tiling', dest='test_tiling', action='store_true', help='debug mode to test tiling')
     parser.add_argument('--fov', dest='fov', default='regular', help='specified the camera field of view')
     parser.add_argument('--motion_blur', dest='motion_blur', action='store_true', help='if specified, input argument include velocity and angular velocity for camera pose')
+    parser.add_argument('--first_last_only', dest='first_last_only', action='store_true', help='if specified, log only 1st and last iteration, do not log mean and std')
+    parser.add_argument('--last_only', dest='last_only', action='store_true', help='log last iteration only')
+    parser.add_argument('--subsample_loops', dest='subsample_loops', type=int, default=-1, help='log every n iter')
+    parser.add_argument('--last_n', dest='last_n', type=int, default=-1, help='log last n percent iterations')
+    parser.add_argument('--render_fix_spatial_sample', dest='render_fix_spatial_sample', action='store_true', help='if specified, fix spatial sample at rendering')
+    parser.add_argument('--render_fix_temporal_sample', dest='render_fix_temporal_sample', action='store_true', help='if specified, fix temporal sample at rendering')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -1134,6 +1225,10 @@ def main():
     parser.set_defaults(tiled_training=False)
     parser.set_defaults(test_tiling=False)
     parser.set_defaults(motion_blur=False)
+    parser.set_defaults(first_last_only=False)
+    parser.set_defaults(last_only=False)
+    parser.set_defaults(render_fix_spatial_sample=False)
+    parser.set_defaults(render_fix_temporal_sample=False)
 
     args = parser.parse_args()
 
@@ -1162,10 +1257,13 @@ def copy_option(args):
     delattr(new_args, 'render_only')
     delattr(new_args, 'render_camera_pos')
     delattr(new_args, 'render_t')
+    delattr(new_args, 'render_camera_pos_velocity')
     delattr(new_args, 'mean_estimator_memory_efficient')
     delattr(new_args, 'visualize_scaling')
     delattr(new_args, 'visualize_ind')
     delattr(new_args, 'test_tiling')
+    delattr(new_args, 'render_fix_spatial_sample')
+    delattr(new_args, 'render_fix_temporal_sample')
     return new_args
 
 def main_network(args):
@@ -1329,6 +1427,9 @@ def main_network(args):
         input_to_network = input
         if args.input_nc == 3:
             color_inds = [0, 1, 2]
+        elif args.input_nc == 7 and args.shader_name == 'oceanic':
+            # a hack for oceanic aux
+            color_inds = [1, 5, 6]
     else:
         output=tf.placeholder(tf.float32,shape=[None,None,None,3])
         camera_pos = tf.placeholder(dtype, shape=6)
@@ -1367,7 +1468,14 @@ def main_network(args):
                     feed_samples = None
                 else:
                     # for inference, need to ensure that noise samples used within an image is the same
-                    feed_samples = [tf.placeholder(dtype=dtype, shape=[1, height+padding_offset, width+padding_offset]), tf.placeholder(dtype=dtype, shape=[1, height+padding_offset, width+padding_offset])]
+                    if not args.mean_estimator:
+                        feed_samples = [tf.placeholder(dtype=dtype, shape=[1, height+padding_offset, width+padding_offset]), tf.placeholder(dtype=dtype, shape=[1, height+padding_offset, width+padding_offset])]
+                    else:
+                        feed_samples = [tf.placeholder(dtype=dtype, shape=[args.estimator_samples, height+padding_offset, width+padding_offset]), tf.placeholder(dtype=dtype, shape=[args.estimator_samples, height+padding_offset, width+padding_offset])]
+
+                    #if args.generate_timeline:
+                    #    feed_samples = None
+
             elif args.test_tiling:
                 h_start = tf.placeholder(dtype=dtype, shape=())
                 #h_offset = tf.placeholder(dtype=dtype)
@@ -1385,7 +1493,22 @@ def main_network(args):
                 h_offset = height
                 w_offset = width
                 feed_samples = None
-            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection, sigmoid_scaling=args.sigmoid_scaling, manual_features_only=args.manual_features_only, efficient_trace=args.efficient_trace, collect_loop_statistic=args.collect_loop_statistic, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=feed_samples, fov=args.fov, camera_pos_velocity=camera_pos_velocity)
+            zero_samples = False
+            #if args.render_only:
+            #    zero_samples = True
+
+            spatial_samples = None
+            temporal_samples = None
+            if args.render_fix_spatial_sample:
+                #spatial_samples = [numpy.random.normal(size=(1, height, width)), numpy.random.normal(size=(1, height, width))]
+                spatial_samples = [numpy.zeros((1, height, width)), numpy.zeros((1, height, width))]
+            if args.render_fix_temporal_sample:
+                temporal_samples = [numpy.random.normal(size=(1, height, width))]
+
+            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection, sigmoid_scaling=args.sigmoid_scaling, manual_features_only=args.manual_features_only, efficient_trace=args.efficient_trace, collect_loop_statistic=args.collect_loop_statistic, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=feed_samples, fov=args.fov, camera_pos_velocity=camera_pos_velocity, first_last_only=args.first_last_only, last_only=args.last_only, subsample_loops=args.subsample_loops, last_n=args.last_n, zero_samples=zero_samples, render_fix_spatial_sample=args.render_fix_spatial_sample, render_fix_temporal_sample=args.render_fix_temporal_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples)
+
+            if args.tiled_training and args.mean_estimator:
+                input_to_network = tf.slice(input_to_network, [0, padding_offset // 2, padding_offset // 2, 0], [args.estimator_samples, args.tiled_h, args.tiled_w, 3])
             color_inds = color_inds[::-1]
             debug_input = input_to_network
 
@@ -1561,7 +1684,7 @@ def main_network(args):
         elif args.gradient_loss_canny_weight:
             loss_add_term = tf.reduce_mean(gradient_loss_term * weight_map)
         else:
-            loss_add_term = tf.reduce_sum(gradient_loss_term * canny_edge) / tf.reduce_sum(canny_edge)
+            loss_add_term = tf.reduce_sum(gradient_loss_term * canny_edge) / tf.maximum(tf.reduce_sum(canny_edge), 1.0)
 
         loss += args.gradient_loss_scale * loss_add_term
 
@@ -1695,8 +1818,10 @@ def main_network(args):
     if args.is_train or args.test_training:
         camera_pos_vals = np.load(os.path.join(args.dataroot, 'train.npy'))
         time_vals = np.load(os.path.join(args.dataroot, 'train_time.npy'))
+        if args.motion_blur:
+            camera_pos_velocity_vals = np.load(os.path.join(args.dataroot, 'train_velocity.npy'))
     else:
-        if True:
+        if not args.motion_blur:
             camera_pos_vals = np.concatenate((
                                 np.load(os.path.join(args.dataroot, 'test_close.npy')),
                                 np.load(os.path.join(args.dataroot, 'test_far.npy')),
@@ -1705,6 +1830,8 @@ def main_network(args):
         else:
             camera_pos_vals = np.load(os.path.join(args.dataroot, 'test.npy'))
         time_vals = np.load(os.path.join(args.dataroot, 'test_time.npy'))
+        if args.motion_blur:
+            camera_pos_velocity_vals = np.load(os.path.join(args.dataroot, 'test_velocity.npy'))
 
     def read_ind(img_arr, name_arr, id, is_npy):
         img_arr[id] = read_name(name_arr[id], is_npy)
@@ -1890,9 +2017,17 @@ def main_network(args):
                     camera_val = camera_pos_vals[frame_idx, :]
                     feed_dict[camera_pos] = camera_val
                     feed_dict[shader_time] = [time_vals[frame_idx]]
+                    if args.motion_blur:
+                        feed_dict[camera_pos_velocity] = camera_pos_velocity_vals[frame_idx, :]
                     _,current =sess.run([opt,loss],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
+                    #current =sess.run(loss,feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
                     if numpy.isnan(current):
-                        current = 0
+                        print(frame_idx, tile_idx)
+                        raise
+                        #arr0 = sess.run(input_to_network, feed_dict=feed_dict)
+                        #print(numpy.sum(numpy.isnan(arr0)), arr0.shape)
+                        #arr1 = sess.run(debug_input, feed_dict=feed_dict)
+                        #print(numpy.sum(numpy.isnan(arr1)), arr1.shape)
 
                 if args.learn_scale:
                     feature_val = sess.run(feature_w)
@@ -1980,11 +2115,15 @@ def main_network(args):
             if args.render_only:
                 camera_pos_vals = np.load(args.render_camera_pos)
                 time_vals = np.load(args.render_t)
+                if args.motion_blur:
+                    camera_pos_velocity_vals = np.load(args.render_camera_pos_velocity)
             elif args.test_training:
                 camera_pos_vals = np.load(os.path.join(args.dataroot, 'train.npy'))
                 time_vals = np.load(os.path.join(args.dataroot, 'train_time.npy'))
+                if args.motion_blur:
+                    camera_pos_velocity_vals = np.load(os.path.join(args.dataroot, 'train_velocity.npy'))
             else:
-                if True:
+                if not args.motion_blur:
                     camera_pos_vals = np.concatenate((
                                         np.load(os.path.join(args.dataroot, 'test_close.npy')),
                                         np.load(os.path.join(args.dataroot, 'test_far.npy')),
@@ -1993,6 +2132,8 @@ def main_network(args):
                 else:
                     camera_pos_vals = np.load(os.path.join(args.dataroot, 'test.npy'))
                 time_vals = np.load(os.path.join(args.dataroot, 'test_time.npy'))
+                if args.motion_blur:
+                    camera_pos_velocity_vals = np.load(os.path.join(args.dataroot, 'test_velocity.npy'))
 
             if args.render_only:
                 debug_dir = args.name + '/render'
@@ -2025,7 +2166,12 @@ def main_network(args):
             if args.render_only:
                 shutil.copyfile(args.render_camera_pos, os.path.join(debug_dir, 'camera_pos.npy'))
                 shutil.copyfile(args.render_t, os.path.join(debug_dir, 'render_t.npy'))
+                if args.motion_blur:
+                    shutil.copyfile(args.render_camera_pos_velocity, os.path.join(debug_dir, 'camera_pos_velocity.npy'))
 
+            python_time = numpy.zeros(time_vals.shape[0])
+            nburns = 10
+            timeline_time = numpy.zeros(time_vals.shape[0] - nburns)
             if args.generate_timeline:
                 run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
                 run_metadata = tf.RunMetadata()
@@ -2039,12 +2185,14 @@ def main_network(args):
                 if args.render_only:
                     for i in range(time_vals.shape[0]):
                         feed_dict = {camera_pos: camera_pos_vals[i, :], shader_time: time_vals[i:i+1]}
+                        if args.motion_blur:
+                            feed_dict[camera_pos_velocity] = camera_pos_velocity_vals[i, :]
                         output_image = sess.run(network, feed_dict=feed_dict)
                         output_image = np.clip(output_image,0.0,1.0)
                         output_image *= 255.0
                         cv2.imwrite("%s/%06d.png"%(debug_dir, i+1),np.uint8(output_image[0,:,:,:]))
                         print('finished', i)
-                    os.system('ffmpeg -i %s -r 30 -c:v libx264 -preset slow -crf 0 %s'%(os.path.join(debug_dir, '%06d.png'), os.path.join(debug_dir, 'video.mp4')))
+                    os.system('ffmpeg -i %s -r 30 -c:v libx264 -preset slow -crf 0 -r 30 %s'%(os.path.join(debug_dir, '%06d.png'), os.path.join(debug_dir, 'video.mp4')))
                     open(os.path.join(debug_dir, 'index.html'), 'w+').write("""
 <html>
 <body>
@@ -2054,6 +2202,8 @@ def main_network(args):
                     return
                 elif args.visualize_scaling:
                     feed_dict = {camera_pos: camera_pos_vals[args.visualize_ind, :], shader_time: time_vals[args.visualize_ind:args.visualize_ind+1]}
+                    if args.motion_blur:
+                        feed_dict[camera_pos_velocity] = camera_pos_velocity_vals[args.visualize_ind, :]
                     all_features = sess.run(debug_input, feed_dict=feed_dict)
                     for i in range(all_features.shape[3]):
                         cv2.imwrite("%s/%05d.png"%(debug_dir, i), all_features[0, :, :, i] * 255.0)
@@ -2064,9 +2214,12 @@ def main_network(args):
                     all_l2 = np.zeros(len(val_img_names), dtype=float)
                     for i in range(len(val_img_names)):
                         output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
-                        print("output_ground get")
+                        #print("output_ground get")
                         camera_val = camera_pos_vals[i, :]
                         feed_dict = {camera_pos: camera_val, shader_time: time_vals[i:i+1]}
+                        if args.motion_blur:
+                            feed_dict[camera_pos_velocity] = camera_pos_velocity_vals[i, :]
+
                         if args.use_weight_map or args.gradient_loss_canny_weight:
                             feed_dict[weight_map] = np.expand_dims(read_name(val_map_names[i], True), 0)
                         if args.gradient_loss:
@@ -2078,7 +2231,7 @@ def main_network(args):
                             else:
                                 feed_dict[dx_ground] = grad_arr[:, :, :, 1:4]
                                 feed_dict[dy_ground] = grad_arr[:, :, :, 4:]
-                        print("feed_dict generated")
+                        #print("feed_dict generated")
                         #pctx.trace_next_step()
                         #pctx.dump_next_step()
                         feed_dict[output] = output_ground
@@ -2086,15 +2239,24 @@ def main_network(args):
 
                         st = time.time()
                         if args.tiled_training:
+                            st_sum = 0
+                            timeline_sum = 0
                             l2_loss_val = 0
                             grad_loss_val = 0
-                            feed_dict[feed_samples[0]] = numpy.random.normal(size=(1, height+padding_offset, width+padding_offset))
-                            feed_dict[feed_samples[1]] = numpy.random.normal(size=(1, height+padding_offset, width+padding_offset))
+                            output_patch = numpy.zeros((1, int(height/ntiles_h), int(width/ntiles_w), 3))
+                            #if not args.generate_timeline:
+                            if True:
+                                if not args.mean_estimator:
+                                    feed_dict[feed_samples[0]] = numpy.random.normal(size=(1, height+padding_offset, width+padding_offset))
+                                    feed_dict[feed_samples[1]] = numpy.random.normal(size=(1, height+padding_offset, width+padding_offset))
+                                else:
+                                    feed_dict[feed_samples[0]] = numpy.random.normal(size=(args.estimator_samples, height+padding_offset, width+padding_offset))
+                                    feed_dict[feed_samples[1]] = numpy.random.normal(size=(args.estimator_samples, height+padding_offset, width+padding_offset))
                             for tile_h in range(int(ntiles_h)):
                                 for tile_w in range(int(ntiles_w)):
                                     tiled_feed_dict = {}
-                                    tiled_feed_dict[h_start] = tile_h * height / ntiles_h - padding_offset / ntiles_h
-                                    tiled_feed_dict[w_start] = tile_w * width / ntiles_w - padding_offset / ntiles_w
+                                    tiled_feed_dict[h_start] = tile_h * height / ntiles_h - padding_offset / 2
+                                    tiled_feed_dict[w_start] = tile_w * width / ntiles_w - padding_offset / 2
                                     for key, value in feed_dict.items():
                                         if isinstance(value, numpy.ndarray) and len(value.shape) >= 3 and value.shape[1] == height and value.shape[2] == width:
                                             if len(value.shape) == 3:
@@ -2104,13 +2266,48 @@ def main_network(args):
                                             tiled_feed_dict[key] = tiled_value
                                         else:
                                             tiled_feed_dict[key] = value
-                                    output_patch, l2_loss_patch, grad_loss_patch = sess.run([network, loss_l2, loss_add_term], feed_dict=tiled_feed_dict)
-                                    output_buffer[0, int(tile_h*height/2):int((tile_h+1)*height/2), int(tile_w*width/2):int((tile_w+1)*width/2), :] = output_patch[0, :, :, :]
+                                    #l2_loss_patch, grad_loss_patch = sess.run([loss_l2, loss_add_term], feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
+                                    st_before = time.time()
+                                    #if not args.generate_timeline:
+                                    if True:
+                                        output_patch, l2_loss_patch, grad_loss_patch = sess.run([network, loss_l2, loss_add_term], feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
+                                    else:
+                                        #output_patch = sess.run(network, feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
+                                        #l2_loss_patch = 0.0
+                                        #grad_loss_patch = 0.0
+                                        #l2_loss_patch = sess.run(loss, feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
+                                        print("test without timeline recorded")
+                                        l2_loss_patch = sess.run(loss, feed_dict=tiled_feed_dict)
+                                        grad_loss_patch = 0.0
+                                    #output_patch = sess.run(network, feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
+                                    st_after = time.time()
+                                    st_sum += (st_after - st_before)
+                                    print(st_after - st_before)
+                                    #l2_loss_patch, grad_loss_patch = sess.run([loss_l2, loss_add_term], feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
+                                    output_buffer[0, int(tile_h*height/ntiles_h):int((tile_h+1)*height/ntiles_h), int(tile_w*width/ntiles_w):int((tile_w+1)*width/ntiles_w), :] = output_patch[0, :, :, :]
                                     l2_loss_val += l2_loss_patch
                                     grad_loss_val += grad_loss_patch
+                                    if args.generate_timeline:
+                                    #if False:
+                                        if i > nburns:
+                                            fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+                                            print("trace fetched")
+                                            chrome_trace = fetched_timeline.generate_chrome_trace_format()
+                                            print("chrome trace generated")
+                                            timeline_data = json.loads(chrome_trace)['traceEvents']
+                                            timeline_sum += read_timeline.read_time_dur(timeline_data)
+                                            if i == time_vals.shape[0] - 1:
+                                                with open("%s/nn_%d_%d_%d.json"%(debug_dir, i+1, tile_w, tile_h), 'w') as f:
+                                                    f.write(chrome_trace)
+                                            print("trace written")
+                            print("timeline estimate:", timeline_sum)
                             output_image = output_buffer
+                            if args.mean_estimator:
+                                output_image = output_image[:, :, :, ::-1]
                             l2_loss_val /= (ntiles_w * ntiles_h)
                             grad_loss_val /= (ntiles_w * ntiles_h)
+                            print("rough time estimate:", st_sum)
+
                         elif args.test_tiling:
                             output_image = numpy.empty(output_ground.shape)
                             feed_dict[feed_samples[0]] = numpy.random.normal(size=(1, height+padding_offset, width+padding_offset))
@@ -2130,40 +2327,58 @@ def main_network(args):
                                 nruns = args.estimator_samples
                             else:
                                 nruns = 1
+                            st_sum = 0
+                            timeline_sum = 0
                             for k in range(nruns):
+                                st_before = time.time()
                                 output_image, l2_loss_val, grad_loss_val = sess.run([network, loss_l2, loss_add_term], options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
+                                st_after = time.time()
+                                st_sum += (st_after - st_before)
                                 if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
                                     output_buffer += output_image[:, :, :, ::-1]
                             st2 = time.time()
-                            print("rough time estimate:", st2 - st)
+                            #print("rough time estimate:", st2 - st)
+                            print("rough time estimate:", st_sum)
                             #pctx.profiler.profile_operations(options=opts)
                             if train_from_queue or args.mean_estimator:
                                 output_image = output_image[:, :, :, ::-1]
-                            print("output_image swap axis")
+                            #print("output_image swap axis")
                             if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
                                 output_buffer /= args.estimator_samples
                                 output_image[:] = output_buffer[:]
+                            if args.generate_timeline:
+                                if i > nburns:
+                                    fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+                                    print("trace fetched")
+                                    chrome_trace = fetched_timeline.generate_chrome_trace_format()
+                                    print("chrome trace generated")
+                                    timeline_data = json.loads(chrome_trace)['traceEvents']
+                                    timeline_sum += read_timeline.read_time_dur(timeline_data)
+                                    if i == time_vals.shape[0] - 1:
+                                        with open("%s/nn_%d.json"%(debug_dir, i+1), 'w') as f:
+                                            f.write(chrome_trace)
+                                    print("trace written")
+                                    print("timeline estimate:", timeline_sum)
                         st2 = time.time()
                         loss_val = np.mean((output_image - output_ground) ** 2) * 255.0 * 255.0
-                        print("loss", loss_val, l2_loss_val * 255.0 * 255.0)
+                        #print("loss", loss_val, l2_loss_val * 255.0 * 255.0)
                         all_test[i] = loss_val
                         all_l2[i] = l2_loss_val
                         all_grad[i] = grad_loss_val
                         output_image=np.clip(output_image,0.0,1.0)
-                        print("output_image clipped")
+                        #print("output_image clipped")
                         output_image *= 255.0
-                        print("output_image scaled")
+                        #print("output_image scaled")
                         cv2.imwrite("%s/%06d.png"%(debug_dir, i+1),np.uint8(output_image[0,:,:,:]))
-                        print("output_image written")
+                        python_time[i] = st_sum
                         if args.generate_timeline:
-                            fetched_timeline = timeline.Timeline(run_metadata.step_stats)
-                            print("trace fetched")
-                            chrome_trace = fetched_timeline.generate_chrome_trace_format()
-                            print("chrome trace generated")
-                            with open("%s/nn_%d.json"%(debug_dir, i+1), 'w') as f:
-                                f.write(chrome_trace)
-                            print("trace written")
+                            timeline_time[i-nburns] = timeline_sum
+                        #print("output_image written")
                     open("%s/all_loss.txt"%debug_dir, 'w').write("%f, %f"%(np.mean(all_l2), np.mean(all_grad)))
+                    numpy.save(os.path.join(debug_dir, 'python_time.npy'), python_time)
+                    numpy.save(os.path.join(debug_dir, 'timeline_time.npy'), timeline_time)
+                    open("%s/all_time.txt"%debug_dir, 'w').write("%f, %f"%(np.median(python_time), np.median(timeline_time)))
+                    print("all times saved")
             test_dirname = debug_dir
 
             if args.collect_validate_loss:
@@ -2173,13 +2388,20 @@ def main_network(args):
                 if args.test_training:
                     camera_pos_vals = np.load(os.path.join(args.dataroot, 'train.npy'))
                     time_vals = np.load(os.path.join(args.dataroot, 'train_time.npy'))
+                    if args.motion_blur:
+                        camera_pos_velocity_vals = np.load(os.path.join(args.dataroot, 'train_velocity.npy'))
                 else:
-                    camera_pos_vals = np.concatenate((
-                                        np.load(os.path.join(args.dataroot, 'test_close.npy')),
-                                        np.load(os.path.join(args.dataroot, 'test_far.npy')),
-                                        np.load(os.path.join(args.dataroot, 'test_middle.npy'))
-                                        ), axis=0)
+                    if not args.motion_blur:
+                        camera_pos_vals = np.concatenate((
+                                            np.load(os.path.join(args.dataroot, 'test_close.npy')),
+                                            np.load(os.path.join(args.dataroot, 'test_far.npy')),
+                                            np.load(os.path.join(args.dataroot, 'test_middle.npy'))
+                                            ), axis=0)
+                    else:
+                        camera_pos_vals = np.load(os.path.join(args.dataroot, 'test.npy'))
                     time_vals = np.load(os.path.join(args.dataroot, 'test_time.npy'))
+                    if args.motion_blur:
+                        camera_pos_velocity_vals = np.load(os.path.join(args.dataroot, 'test_velocity.npy'))
 
                 for dir in dirs:
                     success = False
@@ -2206,6 +2428,9 @@ def main_network(args):
                             output_image = np.expand_dims(read_name(val_img_names[ind], False, False), axis=0)
                             st=time.time()
                             feed_dict = {camera_pos: camera_pos_vals[ind, :], shader_time: time_vals[ind: ind+1], output: output_image}
+                            if args.motion_blur:
+                                feed_dict[camera_pos_velocity] = camera_pos_velocity_vals[ind, :]
+
                             if args.use_weight_map or args.gradient_loss_canny_weight:
                                 feed_dict[weight_map] = np.expand_dims(read_name(val_map_names[ind], True), 0)
                             if args.gradient_loss:
@@ -2408,7 +2633,7 @@ def main_network(args):
     sess.close()
 
     if not args.is_train:
-        check_command = 'source activate pytorch36 && CUDA_VISIBLE_DEVICES=2, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir + ' && source activate tensorflow35'
+        check_command = 'source activate pytorch_new && CUDA_VISIBLE_DEVICES=2, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir + ' && source activate tensorflow35'
         #check_command = 'python plot_clip_weights.py ' + test_dirname + ' ' + grounddir
         subprocess.check_output(check_command, shell=True)
         #os.system('source activate pytorch36 && CUDA_VISIBLE_DEVICES=2, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir)
