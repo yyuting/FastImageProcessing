@@ -41,7 +41,7 @@ less_aggresive_ini = False
 conv_padding = "SAME"
 padding_offset = 32
 
-def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True, sigmoid_scaling=False, manual_features_only=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, zero_samples=False, render_fix_spatial_sample=False, render_fix_temporal_sample=False, spatial_samples=None, temporal_samples=None):
+def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True, sigmoid_scaling=False, manual_features_only=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, first_n=-1, first_n_no_last=-1, mean_var_only=False, zero_samples=False, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None):
     # 2x_1sample on margo
     #camera_pos = np.load('/localtmp/yuting/out_2x1_manual_carft/train.npy')[0, :]
 
@@ -116,6 +116,27 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             assert not last_only
             assert subsample_loops < 0
             render_single_cmd = render_single_cmd + ' --last_n ' + str(last_n)
+        if first_n > 0:
+            assert not first_last_only
+            assert not last_only
+            assert subsample_loops < 0
+            assert last_n < 0
+            render_single_cmd = render_single_cmd + ' --first_n ' + str(first_n)
+        if first_n_no_last > 0:
+            assert not first_last_only
+            assert not last_only
+            assert subsample_loops < 0
+            assert last_n < 0
+            assert first_n < 0
+            render_single_cmd = render_single_cmd + ' --first_n_no_last ' + str(first_n_no_last)
+        if mean_var_only:
+            assert not first_last_only
+            assert not last_only
+            assert subsample_loops < 0
+            assert last_n < 0
+            assert first_n < 0
+            assert first_n_no_last < 0
+            render_single_cmd = render_single_cmd + ' --mean_var_only'
         entire_cmd = 'cd ' + render_util_dir + ' && ' + render_single_cmd + ' && cd ' + cwd
         ans = os.system(entire_cmd)
         #ans = subprocess.call('cd ' + render_util_dir + ' && source activate py36 && python ' + render_single_full_name + ' out ' + shader_args + ' --is-tf --code-only --log-intermediates && source activate tensorflow35 && cd ' + cwd)
@@ -145,7 +166,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
 
     #samples = [all_features[-2, :, :], all_features[-1, :, :]]
 
-    features, vec_output, manual_features = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, geometry=geometry, return_vec_output=True, compiler_module=compiler_module, manual_features_only=manual_features_only, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=samples, fov=fov, camera_pos_velocity=camera_pos_velocity, t_sigma=t_sigma, zero_samples=zero_samples, render_fix_spatial_sample=render_fix_spatial_sample, render_fix_temporal_sample=render_fix_temporal_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples)
+    features, vec_output, manual_features = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, geometry=geometry, return_vec_output=True, compiler_module=compiler_module, manual_features_only=manual_features_only, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=samples, fov=fov, camera_pos_velocity=camera_pos_velocity, t_sigma=t_sigma, zero_samples=zero_samples, render_fix_spatial_sample=render_fix_spatial_sample, render_fix_temporal_sample=render_fix_temporal_sample, render_zero_spatial_sample=render_zero_spatial_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples)
 
     if len(vec_output) > 3:
         loop_statistic = vec_output[3:]
@@ -315,7 +336,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
     #numpy.save('valid_inds.npy', valid_inds)
     #return features
 
-def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None, geometry='plane', zero_samples=False, debug=[], extra_args=[None], render_g=False, manual_features_only=False, fov='regular', h_start=0, h_offset=height, w_start=0, w_offset=width, camera_pos_velocity=None, t_sigma=1/60.0, render_fix_spatial_sample=False, render_fix_temporal_sample=False, spatial_samples=None, temporal_samples=None):
+def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None, geometry='plane', zero_samples=False, debug=[], extra_args=[None], render_g=False, manual_features_only=False, fov='regular', h_start=0, h_offset=height, w_start=0, w_offset=width, camera_pos_velocity=None, t_sigma=1/60.0, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None):
     #vec_output_len = compiler_module.vec_output_len
     assert compiler_module is not None
     #if shader_name == 'zigzag':
@@ -425,7 +446,7 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     if not zero_samples:
         print("using random samples")
 
-        if render_fix_spatial_sample and spatial_samples is not None:
+        if (render_fix_spatial_sample or render_zero_spatial_sample) and spatial_samples is not None:
             print("fix spatial samples")
             sample1 = tf.constant(spatial_samples[0], dtype=dtype)
             sample2 = tf.constant(spatial_samples[1], dtype=dtype)
@@ -1155,9 +1176,14 @@ def main():
     parser.add_argument('--first_last_only', dest='first_last_only', action='store_true', help='if specified, log only 1st and last iteration, do not log mean and std')
     parser.add_argument('--last_only', dest='last_only', action='store_true', help='log last iteration only')
     parser.add_argument('--subsample_loops', dest='subsample_loops', type=int, default=-1, help='log every n iter')
-    parser.add_argument('--last_n', dest='last_n', type=int, default=-1, help='log last n percent iterations')
+    parser.add_argument('--last_n', dest='last_n', type=int, default=-1, help='log last n iterations')
+    parser.add_argument('--first_n', dest='first_n', type=int, default=-1, help='log first n iterations and last one')
+    parser.add_argument('--first_n_no_last', dest='first_n_no_last', type=int, default=-1, help='log first n iterations')
+    parser.add_argument('--mean_var_only', dest='mean_var_only', action='store_true', help='if flagged, use only mean and variance as loop statistic')
     parser.add_argument('--render_fix_spatial_sample', dest='render_fix_spatial_sample', action='store_true', help='if specified, fix spatial sample at rendering')
     parser.add_argument('--render_fix_temporal_sample', dest='render_fix_temporal_sample', action='store_true', help='if specified, fix temporal sample at rendering')
+    parser.add_argument('--render_zero_spatial_sample', dest='render_zero_spatial_sample', action='store_true', help='if specified, use zero spatial sample')
+    parser.add_argument('--render_fov', dest='render_fov', default='', help='if specified, can overwrite fov at render time')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -1229,6 +1255,8 @@ def main():
     parser.set_defaults(last_only=False)
     parser.set_defaults(render_fix_spatial_sample=False)
     parser.set_defaults(render_fix_temporal_sample=False)
+    parser.set_defaults(render_zero_spatial_sample=False)
+    parser.set_defaults(mean_var_only=False)
 
     args = parser.parse_args()
 
@@ -1264,6 +1292,8 @@ def copy_option(args):
     delattr(new_args, 'test_tiling')
     delattr(new_args, 'render_fix_spatial_sample')
     delattr(new_args, 'render_fix_temporal_sample')
+    delattr(new_args, 'render_zero_spatial_sample')
+    delattr(new_args, 'render_fov')
     return new_args
 
 def main_network(args):
@@ -1348,6 +1378,8 @@ def main_network(args):
 
     if args.render_only:
         args.is_train = False
+        if args.render_fov != '':
+            args.fov = args.render_fov
 
     if args.mean_estimator_memory_efficient:
         assert not args.generate_timeline
@@ -1500,12 +1532,15 @@ def main_network(args):
             spatial_samples = None
             temporal_samples = None
             if args.render_fix_spatial_sample:
-                #spatial_samples = [numpy.random.normal(size=(1, height, width)), numpy.random.normal(size=(1, height, width))]
+                print("generate random fixed spatial sample")
+                spatial_samples = [numpy.random.normal(size=(1, height, width)), numpy.random.normal(size=(1, height, width))]
+            elif args.render_zero_spatial_sample:
+                print("generate zero spatial sample")
                 spatial_samples = [numpy.zeros((1, height, width)), numpy.zeros((1, height, width))]
             if args.render_fix_temporal_sample:
                 temporal_samples = [numpy.random.normal(size=(1, height, width))]
 
-            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection, sigmoid_scaling=args.sigmoid_scaling, manual_features_only=args.manual_features_only, efficient_trace=args.efficient_trace, collect_loop_statistic=args.collect_loop_statistic, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=feed_samples, fov=args.fov, camera_pos_velocity=camera_pos_velocity, first_last_only=args.first_last_only, last_only=args.last_only, subsample_loops=args.subsample_loops, last_n=args.last_n, zero_samples=zero_samples, render_fix_spatial_sample=args.render_fix_spatial_sample, render_fix_temporal_sample=args.render_fix_temporal_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples)
+            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection, sigmoid_scaling=args.sigmoid_scaling, manual_features_only=args.manual_features_only, efficient_trace=args.efficient_trace, collect_loop_statistic=args.collect_loop_statistic, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=feed_samples, fov=args.fov, camera_pos_velocity=camera_pos_velocity, first_last_only=args.first_last_only, last_only=args.last_only, subsample_loops=args.subsample_loops, last_n=args.last_n, first_n=args.first_n, first_n_no_last=args.first_n_no_last, mean_var_only=args.mean_var_only, zero_samples=zero_samples, render_fix_spatial_sample=args.render_fix_spatial_sample, render_fix_temporal_sample=args.render_fix_temporal_sample, render_zero_spatial_sample=args.render_zero_spatial_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples)
 
             if args.tiled_training and args.mean_estimator:
                 input_to_network = tf.slice(input_to_network, [0, padding_offset // 2, padding_offset // 2, 0], [args.estimator_samples, args.tiled_h, args.tiled_w, 3])
@@ -2187,7 +2222,20 @@ def main_network(args):
                         feed_dict = {camera_pos: camera_pos_vals[i, :], shader_time: time_vals[i:i+1]}
                         if args.motion_blur:
                             feed_dict[camera_pos_velocity] = camera_pos_velocity_vals[i, :]
-                        output_image = sess.run(network, feed_dict=feed_dict)
+                        if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
+                            nruns = args.estimator_samples
+                            output_buffer = numpy.zeros((1, 640, 960, 3))
+                        else:
+                            nruns = 1
+                        for _ in range(nruns):
+                            output_image = sess.run(network, feed_dict=feed_dict)
+                            if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
+                                output_buffer += output_image[:, :, :, ::-1]
+                        if args.mean_estimator:
+                            output_image = output_image[:, :, :, ::-1]
+                        if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
+                            output_buffer /= args.estimator_samples
+                            output_image[:] = output_buffer[:]
                         output_image = np.clip(output_image,0.0,1.0)
                         output_image *= 255.0
                         cv2.imwrite("%s/%06d.png"%(debug_dir, i+1),np.uint8(output_image[0,:,:,:]))
@@ -2633,7 +2681,7 @@ def main_network(args):
     sess.close()
 
     if not args.is_train:
-        check_command = 'source activate pytorch_new && CUDA_VISIBLE_DEVICES=2, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir + ' && source activate tensorflow35'
+        check_command = 'source activate pytorch36 && CUDA_VISIBLE_DEVICES=2, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir + ' && source activate tensorflow35'
         #check_command = 'python plot_clip_weights.py ' + test_dirname + ' ' + grounddir
         subprocess.check_output(check_command, shell=True)
         #os.system('source activate pytorch36 && CUDA_VISIBLE_DEVICES=2, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir)
