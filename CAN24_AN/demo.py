@@ -16,9 +16,7 @@ import pickle
 from tensorflow.python.client import timeline
 import copy
 from shaders import *
-import sys; sys.path += ['/home/yy2bb/global_opt/proj/apps']
-sys.path += ['/home/yy2bb/tensorflow-vgg']
-import vgg16
+import sys; sys.path += ['../../global_opt/proj/apps']
 #import compiler_problem
 from unet import unet
 import importlib
@@ -46,7 +44,10 @@ less_aggresive_ini = False
 conv_padding = "SAME"
 padding_offset = 32
 
-deprecated_options = ['feature_reduction_channel_by_samples']
+deprecated_options = ['feature_reduction_channel_by_samples',
+                      'perceptual_loss',
+                      'perceptual_loss_term',
+                      'perceptual_loss_scale']
 
 def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True, sigmoid_scaling=False, manual_features_only=False, aux_plus_manual_features=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, first_n=-1, first_n_no_last=-1, mean_var_only=False, zero_samples=False, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None, every_nth=-1, every_nth_stratified=False, one_hop_parent=False, target_idx=[], use_manual_index=False, manual_index_file=''):
     # 2x_1sample on margo
@@ -1115,11 +1116,6 @@ def prepare_data_root(dataroot, use_weight_map=False, gradient_loss=False):
 
     return input_names, output_names, val_names, val_img_names, map_names, val_map_names, grad_names, val_grad_names
 
-
-os.system('nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp')
-os.environ['CUDA_VISIBLE_DEVICES']=str(np.argmax([int(x.split()[2]) for x in open('tmp','r').readlines()]))
-os.system('rm tmp')
-
 def save_obj(obj, name ):
     with open(name, 'wb') as f:
         pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
@@ -1201,10 +1197,7 @@ def main():
     parser.add_argument('--no_identity_output_layer', dest='identity_output_layer', action='store_false', help='if specified, do not use identity mapping for output layer')
     parser.add_argument('--less_aggresive_ini', dest='less_aggresive_ini', action='store_true', help='if specified, use a less aggresive way to initialize RGB weights (multiples of the original xavier weights)')
     parser.add_argument('--orig_rgb', dest='orig_rgb', action='store_true', help='if specified, original channel before finetune is rgb')
-    parser.add_argument('--perceptual_loss', dest='perceptual_loss', action='store_true',help='if specified, use perceptual loss as well as L2 loss')
-    parser.add_argument('--perceptual_loss_term', dest='perceptual_loss_term', default='conv1_1', help='specify to use which layer in vgg16 as perceptual loss')
     parser.add_argument('--use_weight_map', dest='use_weight_map', action='store_true', help='if specified, use weight map to guide loss calculation')
-    parser.add_argument('--perceptual_loss_scale', dest='perceptual_loss_scale', type=float, default=0.0001, help='used to scale perceptual loss')
     parser.add_argument('--render_only', dest='render_only', action='store_true', help='if specified, render using given camera pos, does not calculate loss')
     parser.add_argument('--render_camera_pos', dest='render_camera_pos', default='camera_pos.npy', help='used to render result')
     parser.add_argument('--render_t', dest='render_t', default='render_t.npy', help='used to render output')
@@ -1271,6 +1264,7 @@ def main():
     parser.add_argument('--aux_plus_manual_features', dest='aux_plus_manual_features', action='store_true', help='if specified, use RGB+aux+manual features')
     parser.add_argument('--use_manual_index', dest='use_manual_index', action='store_true', help='if true, only use trace indexed in dataroot for training')
     parser.add_argument('--manual_index_file', dest='manual_index_file', default='index.npy', help='specifies file that stores index of trace used for training')
+    parser.add_argument('--automatic_find_gpu', dest='automatic_find_gpu', action='store_true', help='if specified, automatically finds a gpu available on machine (instead of relying on slurm to allocate one)')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -1316,7 +1310,6 @@ def main():
     parser.set_defaults(identity_output_layer=True)
     parser.set_defaults(less_aggresive_ini=False)
     parser.set_defaults(orig_rgb=False)
-    parser.set_defaults(perceptual_loss=False)
     parser.set_defaults(use_weight_map=False)
     parser.set_defaults(gradient_loss=False)
     parser.set_defaults(normalize_grad=False)
@@ -1356,8 +1349,15 @@ def main():
     parser.set_defaults(every_nth_stratified=False)
     parser.set_defaults(aux_plus_manual_features=False)
     parser.set_defaults(use_manual_index=False)
+    parser.set_defaults(automatic_find_gpu=False)
 
     args = parser.parse_args()
+
+    if args.automatic_find_gpu:
+        print("automatically find available gpu")
+        os.system('nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp')
+        os.environ['CUDA_VISIBLE_DEVICES']=str(np.argmax([int(x.split()[2]) for x in open('tmp','r').readlines()]))
+        os.system('rm tmp')
 
     main_network(args)
 
@@ -1395,6 +1395,7 @@ def copy_option(args):
     delattr(new_args, 'render_fov')
     delattr(new_args, 'zero_out_sparsity_vec')
     delattr(new_args, 'sparsity_vec_histogram')
+    delattr(new_args, 'automatic_find_gpu')
     return new_args
 
 def main_network(args):
@@ -1892,14 +1893,6 @@ def main_network(args):
             loss_add_term = tf.reduce_sum(gradient_loss_term * canny_edge) / tf.maximum(tf.reduce_sum(canny_edge), 1.0)
 
         loss += args.gradient_loss_scale * loss_add_term
-
-    if args.perceptual_loss:
-        vgg_in = vgg16.Vgg16()
-        vgg_in.build(network)
-        vgg_out = vgg16.Vgg16()
-        vgg_out.build(output)
-        loss_vgg = tf.reduce_mean(tf.square(getattr(vgg_in, args.perceptual_loss_term) - getattr(vgg_out, args.perceptual_loss_term)))
-        loss += args.perceptual_loss_scale * loss_vgg
 
     avg_loss = 0
     tf.summary.scalar('avg_loss', avg_loss)
