@@ -46,12 +46,14 @@ less_aggresive_ini = False
 conv_padding = "SAME"
 padding_offset = 32
 
-def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True, sigmoid_scaling=False, manual_features_only=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, first_n=-1, first_n_no_last=-1, mean_var_only=False, zero_samples=False, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None, every_nth=-1, every_nth_stratified=False, one_hop_parent=False, target_idx=[]):
+def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True, sigmoid_scaling=False, manual_features_only=False, aux_plus_manual_features=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, first_n=-1, first_n_no_last=-1, mean_var_only=False, zero_samples=False, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None, every_nth=-1, every_nth_stratified=False, one_hop_parent=False, target_idx=[], use_manual_index=False, manual_index_file=''):
     # 2x_1sample on margo
     #camera_pos = np.load('/localtmp/yuting/out_2x1_manual_carft/train.npy')[0, :]
 
     #feature_scale = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/datas_rescaled_25_75_2_153/feature_scale.npy')
     #feature_bias = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/datas_rescaled_25_75_2_153/feature_bias.npy')
+
+    manual_features_only = manual_features_only or aux_plus_manual_features
 
     if output_type not in ['rgb', 'bgr']:
         if not sigmoid_scaling:
@@ -178,7 +180,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
 
     #samples = [all_features[-2, :, :], all_features[-1, :, :]]
 
-    features, vec_output, manual_features = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, geometry=geometry, return_vec_output=True, compiler_module=compiler_module, manual_features_only=manual_features_only, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=samples, fov=fov, camera_pos_velocity=camera_pos_velocity, t_sigma=t_sigma, zero_samples=zero_samples, render_fix_spatial_sample=render_fix_spatial_sample, render_fix_temporal_sample=render_fix_temporal_sample, render_zero_spatial_sample=render_zero_spatial_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples)
+    features, vec_output, manual_features = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, geometry=geometry, return_vec_output=True, compiler_module=compiler_module, manual_features_only=manual_features_only, aux_plus_manual_features=aux_plus_manual_features, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=samples, fov=fov, camera_pos_velocity=camera_pos_velocity, t_sigma=t_sigma, zero_samples=zero_samples, render_fix_spatial_sample=render_fix_spatial_sample, render_fix_temporal_sample=render_fix_temporal_sample, render_zero_spatial_sample=render_zero_spatial_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples)
 
     if len(vec_output) > 3:
         loop_statistic = vec_output[3:]
@@ -261,6 +263,19 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                 out_features = target_features
                 feature_bias = feature_bias[target_idx]
                 feature_scale = feature_scale[target_idx]
+
+            if use_manual_index:
+                manual_index = numpy.load(manual_index_file)
+                target_features = [out_features[idx] for idx in manual_index]
+                # a hack to make sure RGB channels are in output features
+                for vec in vec_output:
+                    if vec not in target_features:
+                        vec_index = out_features.index(vec)
+                        target_features.append(vec)
+                        manual_index = numpy.concatenate((manual_index, [vec_index]))
+                out_features = target_features
+                feature_bias = feature_bias[manual_index]
+                feature_scale = feature_scale[manual_index]
 
             for vec in vec_output:
                 #raw_ind = features.index(vec)
@@ -365,7 +380,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
     #numpy.save('valid_inds.npy', valid_inds)
     #return features
 
-def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None, geometry='plane', zero_samples=False, debug=[], extra_args=[None], render_g=False, manual_features_only=False, fov='regular', h_start=0, h_offset=height, w_start=0, w_offset=width, camera_pos_velocity=None, t_sigma=1/60.0, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None):
+def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None, geometry='plane', zero_samples=False, debug=[], extra_args=[None], render_g=False, manual_features_only=False, aux_plus_manual_features=False, fov='regular', h_start=0, h_offset=height, w_start=0, w_offset=width, camera_pos_velocity=None, t_sigma=1/60.0, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None):
     #vec_output_len = compiler_module.vec_output_len
     assert compiler_module is not None
     #if shader_name == 'zigzag':
@@ -401,14 +416,20 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
 
     if manual_features_only:
         manual_features_len = compiler_module.f_log_intermediate_subset_len
+        manual_depth_offset = 0
         if geometry != 'none':
             manual_features_len += 1
+            manual_depth_offset = 1
+        if aux_plus_manual_features:
+            manual_features_len += features_len_add
         if camera_pos_velocity is not None:
             manual_features_len += 6
             motion_start = compiler_module.f_log_intermediate_subset_len
         f_log_intermediate_subset = [None] * manual_features_len
     else:
         f_log_intermediate_subset = []
+        manual_features_len = 0
+        manual_depth_offset = 0
 
     f_log_intermediate = [None] * features_len
     vec_output = [None] * vec_output_len
@@ -494,10 +515,14 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     #vector3 = [tensor_x0, tensor_x1, tensor_x2]
     f_log_intermediate[0] = shader_time
     f_log_intermediate[1] = camera_pos
-    get_shader(vector3, f_log_intermediate, f_log_intermediate_subset, camera_pos, features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output, compiler_module=compiler_module, geometry=geometry, debug=debug, extra_args=extra_args, render_g=render_g, manual_features_only=manual_features_only, fov=fov, camera_pos_velocity=camera_pos_velocity, features_len_add=features_len_add)
+    get_shader(vector3, f_log_intermediate, f_log_intermediate_subset, camera_pos, features_len, manual_features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output, compiler_module=compiler_module, geometry=geometry, debug=debug, extra_args=extra_args, render_g=render_g, manual_features_only=manual_features_only, aux_plus_manual_features=aux_plus_manual_features, fov=fov, camera_pos_velocity=camera_pos_velocity, features_len_add=features_len_add, manual_depth_offset=manual_depth_offset)
 
     f_log_intermediate[features_len-2] = sample1
     f_log_intermediate[features_len-1] = sample2
+
+    if aux_plus_manual_features:
+        f_log_intermediate_subset[manual_features_len-2-manual_depth_offset] = sample1
+        f_log_intermediate_subset[manual_features_len-1-manual_depth_offset] = sample2
 
     if camera_pos_velocity is not None:
         f_log_intermediate[features_len-3] = sample3
@@ -520,7 +545,7 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     else:
         return f_log_intermediate
 
-def get_shader(x, f_log_intermediate, f_log_intermediate_subset, camera_pos, features_len, shader_name='zigzag', color_inds=None, vec_output=None, compiler_module=None, geometry='plane', debug=[], extra_args=[None], render_g=False, manual_features_only=False, fov='regular', camera_pos_velocity=None, features_len_add=7):
+def get_shader(x, f_log_intermediate, f_log_intermediate_subset, camera_pos, features_len, manual_features_len, shader_name='zigzag', color_inds=None, vec_output=None, compiler_module=None, geometry='plane', debug=[], extra_args=[None], render_g=False, manual_features_only=False, aux_plus_manual_features=False, fov='regular', camera_pos_velocity=None, features_len_add=7, manual_depth_offset=1):
     assert compiler_module is not None
     features_dt = []
     features = get_features(x, camera_pos, geometry=geometry, debug=debug, extra_args=extra_args, fov=fov, camera_pos_velocity=camera_pos_velocity, features_dt=features_dt)
@@ -560,6 +585,9 @@ def get_shader(x, f_log_intermediate, f_log_intermediate_subset, camera_pos, fea
                 features_pos_x = get_features(new_x, camera_pos, geometry=geometry, fov=fov)
                 f_log_intermediate[features_len-features_len_add] = (features_pos_x[u_ind] - features_neg_x[u_ind]) / (2 * h)
                 f_log_intermediate[features_len-features_len_add+1] = (features_pos_x[v_ind] - features_neg_x[v_ind]) / (2 * h)
+                if aux_plus_manual_features:
+                    f_log_intermediate_subset[manual_features_len-features_len_add-manual_depth_offset] = f_log_intermediate[features_len-features_len_add]
+                    f_log_intermediate_subset[manual_features_len-features_len_add-manual_depth_offset+1] = f_log_intermediate[features_len-features_len_add+1]
 
                 new_x = x[:]
                 new_x[1] = x[1] - h
@@ -570,6 +598,11 @@ def get_shader(x, f_log_intermediate, f_log_intermediate_subset, camera_pos, fea
                 f_log_intermediate[features_len-features_len_add+3] = (features_pos_y[v_ind] - features_neg_y[v_ind]) / (2 * h)
 
                 f_log_intermediate[features_len-features_len_add+4] = f_log_intermediate[features_len-features_len_add] * f_log_intermediate[features_len-features_len_add+3] - f_log_intermediate[features_len-features_len_add+1] * f_log_intermediate[features_len-features_len_add+2]
+
+                if aux_plus_manual_features:
+                    f_log_intermediate_subset[manual_features_len-features_len_add-manual_depth_offset+2] = f_log_intermediate[features_len-features_len_add+2]
+                    f_log_intermediate_subset[manual_features_len-features_len_add-manual_depth_offset+3] = f_log_intermediate[features_len-features_len_add+3]
+                    f_log_intermediate_subset[manual_features_len-features_len_add-manual_depth_offset+4] = f_log_intermediate[features_len-features_len_add+4]
 
             if camera_pos_velocity is not None and geometry == 'plane':
                 f_log_intermediate[features_len-10] = features_dt[0]
@@ -1234,6 +1267,9 @@ def main():
     parser.add_argument('--schedule_scale_after_freeze', dest='schedule_scale_after_freeze', action='store_true', help='if specified, weight scale is changed only after phase 1 (changing nonconvexity) is finished and phase 2 (maximum nonconvexity fixed) is started')
     parser.add_argument('--finetune_epoch', dest='finetune_epoch', type=int, default=-1, help='if specified, use checkpoint from specified epoch for finetune start point')
     parser.add_argument('--every_nth_stratified', dest='every_nth_stratified', action='store_true', help='if specified, do stratified sampling for every nth traces')
+    parser.add_argument('--aux_plus_manual_features', dest='aux_plus_manual_features', action='store_true', help='if specified, use RGB+aux+manual features')
+    parser.add_argument('--use_manual_index', dest='use_manual_index', action='store_true', help='if true, only use trace indexed in dataroot for training')
+    parser.add_argument('--manual_index_file', dest='manual_index_file', default='index.npy', help='specifies file that stores index of trace used for training')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -1318,6 +1354,8 @@ def main():
     parser.set_defaults(random_target_channel=False)
     parser.set_defaults(schedule_scale_after_freeze=False)
     parser.set_defaults(every_nth_stratified=False)
+    parser.set_defaults(aux_plus_manual_features=False)
+    parser.set_defaults(use_manual_index=False)
 
     args = parser.parse_args()
 
@@ -1624,7 +1662,7 @@ def main_network(args):
                     target_idx = numpy.random.choice(args.input_nc, args.sparsity_target_channel, replace=False).astype('i')
                     numpy.save(target_idx_file, target_idx)
 
-            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection, sigmoid_scaling=args.sigmoid_scaling, manual_features_only=args.manual_features_only, efficient_trace=args.efficient_trace, collect_loop_statistic=args.collect_loop_statistic, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=feed_samples, fov=args.fov, camera_pos_velocity=camera_pos_velocity, first_last_only=args.first_last_only, last_only=args.last_only, subsample_loops=args.subsample_loops, last_n=args.last_n, first_n=args.first_n, first_n_no_last=args.first_n_no_last, mean_var_only=args.mean_var_only, zero_samples=zero_samples, render_fix_spatial_sample=args.render_fix_spatial_sample, render_fix_temporal_sample=args.render_fix_temporal_sample, render_zero_spatial_sample=args.render_zero_spatial_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples, every_nth=args.every_nth, every_nth_stratified=args.every_nth_stratified, one_hop_parent=args.one_hop_parent, target_idx=target_idx)
+            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection, sigmoid_scaling=args.sigmoid_scaling, manual_features_only=args.manual_features_only, aux_plus_manual_features=args.aux_plus_manual_features, efficient_trace=args.efficient_trace, collect_loop_statistic=args.collect_loop_statistic, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=feed_samples, fov=args.fov, camera_pos_velocity=camera_pos_velocity, first_last_only=args.first_last_only, last_only=args.last_only, subsample_loops=args.subsample_loops, last_n=args.last_n, first_n=args.first_n, first_n_no_last=args.first_n_no_last, mean_var_only=args.mean_var_only, zero_samples=zero_samples, render_fix_spatial_sample=args.render_fix_spatial_sample, render_fix_temporal_sample=args.render_fix_temporal_sample, render_zero_spatial_sample=args.render_zero_spatial_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples, every_nth=args.every_nth, every_nth_stratified=args.every_nth_stratified, one_hop_parent=args.one_hop_parent, target_idx=target_idx, use_manual_index=args.use_manual_index, manual_index_file=args.manual_index_file)
 
             if args.random_target_channel:
                 numpy.save(target_idx_file, target_idx)
