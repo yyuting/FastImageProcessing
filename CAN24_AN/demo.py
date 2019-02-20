@@ -46,6 +46,8 @@ less_aggresive_ini = False
 conv_padding = "SAME"
 padding_offset = 32
 
+deprecated_options = ['feature_reduction_channel_by_samples']
+
 def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True, sigmoid_scaling=False, manual_features_only=False, aux_plus_manual_features=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, first_n=-1, first_n_no_last=-1, mean_var_only=False, zero_samples=False, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None, every_nth=-1, every_nth_stratified=False, one_hop_parent=False, target_idx=[], use_manual_index=False, manual_index_file=''):
     # 2x_1sample on margo
     #camera_pos = np.load('/localtmp/yuting/out_2x1_manual_carft/train.npy')[0, :]
@@ -1132,7 +1134,7 @@ def main():
     parser.add_argument('--dataroot', dest='dataroot', default='../data', help='directory to store training and testing data')
     parser.add_argument('--is_npy', dest='is_npy', action='store_true', help='whether input is npy format')
     parser.add_argument('--is_train', dest='is_train', action='store_true', help='state whether this is training or testing')
-    parser.add_argument('--input_nc', dest='input_nc', type=int, default=3, help='number of channels for input')
+    parser.add_argument('--input_nc', dest='input_nc', type=int, default=-1, help='number of channels for input')
     parser.add_argument('--use_batch', dest='use_batch', action='store_true', help='whether to use batches in training')
     parser.add_argument('--batch_size', dest='batch_size', type=int, default=1, help='size of batches')
     parser.add_argument('--finetune', dest='finetune', action='store_true', help='fine tune on a previously tuned network')
@@ -1169,7 +1171,6 @@ def main():
     parser.add_argument('--Frobenius_normalize', dest='Frobenius_normalize', action='store_true', help='when specified, use Frobenius norm to normalize feature selecton matrix, followed by L1 regularization')
     parser.add_argument('--add_initial_layers', dest='add_initial_layers', action='store_true', help='add initial conv layers without dilation')
     parser.add_argument('--initial_layer_channels', dest='initial_layer_channels', type=int, default=-1, help='number of channels in initial layers')
-    parser.add_argument('--feature_reduction_channel_by_samples', dest='feature_reduction_channel_by_samples', action='store_true', help='adjust feature reduction channel by number of samples in data')
     parser.add_argument('--conv_channel_multiplier', dest='conv_channel_multiplier', type=int, default=1, help='multiplier for conv channel')
     parser.add_argument('--add_final_layers', dest='add_final_layers', action='store_true', help='add final conv layers without dilation')
     parser.add_argument('--final_layer_channels', dest='final_layer_channels', type=int, default=-1, help='number of channels in final layers')
@@ -1293,7 +1294,6 @@ def main():
     parser.set_defaults(rowwise_L2_normalize=False)
     parser.set_defaults(Frobenius_normalize=False)
     parser.set_defaults(add_initial_layers=False)
-    parser.set_defaults(feature_reduction_channel_by_samples=False)
     parser.set_defaults(add_final_layers=False)
     parser.set_defaults(dilation_remove_large=False)
     parser.set_defaults(dilation_clamp_large=False)
@@ -1424,6 +1424,11 @@ def main_network(args):
                     updated_keys.append(key)
             for key in updated_keys:
                 delattr(option_copy, key)
+            for key in deprecated_options:
+                if key in option_str:
+                    idx = option_str.index(key)
+                    next_sep = option_str.index(',', idx)
+                    option_str = option_str.replace(option_str[idx:next_sep+2], '')
             assert option_str == str(option_copy)
             option_copy = copy_option(args)
             open(option_file, 'w').write(str(option_copy))
@@ -1432,14 +1437,6 @@ def main_network(args):
 
     assert np.log2(args.upsample_scale) == int(np.log2(args.upsample_scale))
     deconv_layers = int(np.log2(args.upsample_scale))
-
-    if not args.feature_reduction_channel_by_samples:
-        assert args.input_nc % args.nsamples == 0
-        nfeatures = args.input_nc // args.nsamples
-    else:
-        nfeatures = args.input_nc
-
-    assert not (args.share_weights and args.feature_reduction_channel_by_samples)
 
     global batch_norm_is_training
     batch_norm_is_training = args.is_train
@@ -1671,6 +1668,7 @@ def main_network(args):
 
             if args.tiled_training and args.mean_estimator:
                 input_to_network = tf.slice(input_to_network, [0, padding_offset // 2, padding_offset // 2, 0], [args.estimator_samples, args.tiled_h, args.tiled_w, 3])
+            args.input_nc = int(input_to_network.shape[-1])
             color_inds = color_inds[::-1]
             debug_input = input_to_network
 
@@ -1766,10 +1764,7 @@ def main_network(args):
                 if (args.regularizer_scale > 0 or args.L2_regularizer_scale > 0) and not manual_regularize:
                     regularizer = slim.l1_l2_regularizer(scale_l1=args.regularizer_scale, scale_l2=args.L2_regularizer_scale)
                 actual_initial_layer_channels = args.initial_layer_channels
-                actual_nfeatures = nfeatures
-                if args.feature_reduction_channel_by_samples:
-                    actual_initial_layer_channels *= args.nsamples
-                    actual_nfeatures = args.input_nc
+                actual_nfeatures = args.input_nc
                 with tf.variable_scope("feature_reduction"):
                     weights = tf.get_variable('w0', [1, 1, actual_nfeatures, actual_initial_layer_channels], initializer=tf.contrib.layers.xavier_initializer() if not args.identity_initialize else identity_initializer(color_inds), regularizer=regularizer)
                     if args.normalize_weights:
