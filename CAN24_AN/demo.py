@@ -26,6 +26,7 @@ import shutil
 from tf_util import *
 import json
 import read_timeline
+import glob
 
 allowed_dtypes = ['float64', 'float32', 'uint8']
 no_L1_reg_other_layers = True
@@ -268,6 +269,15 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                 feature_scale = feature_scale[target_idx]
 
             if use_manual_index:
+                manual_index_prefix = manual_index_file.replace('clustered_idx.npy', '')
+                #files = glob.glob(manual_index_prefix + '*')
+                filenames = ['cluster_result',
+                            'clustered_idx.npy',
+                            'log.txt']
+                for file in filenames:
+                    old_file = manual_index_prefix + file
+                    new_file = os.path.join(name, file)
+                    shutil.copyfile(old_file, new_file)
                 manual_index = numpy.load(manual_index_file)
                 target_features = [out_features[idx] for idx in manual_index]
                 # a hack to make sure RGB channels are in output features
@@ -2971,7 +2981,8 @@ def main_network(args):
         coord.join(threads)
     sess.close()
 
-    if not args.is_train:
+    #if not args.is_train:
+    if False:
         check_command = 'source activate pytorch36 && CUDA_VISIBLE_DEVICES=2, python plot_clip_weights.py ' + test_dirname + ' ' + grounddir + ' && source activate tensorflow35'
         #check_command = 'python plot_clip_weights.py ' + test_dirname + ' ' + grounddir
         subprocess.check_output(check_command, shell=True)
