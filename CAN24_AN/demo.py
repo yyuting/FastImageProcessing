@@ -2456,7 +2456,7 @@ def main_network(args):
 
                 if min_avg_loss == avg_training_loss:
                     saver.save(sess,"%s/model.ckpt"%args.name)
-                saver.save(sess,"%s/%04d/model.ckpt"%(args.name,epoch))
+                #saver.save(sess,"%s/%04d/model.ckpt"%(args.name,epoch))
 
         #var_list_gconv1 = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='g_conv1')
         #g_conv1_dict = {}
