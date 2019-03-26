@@ -8,23 +8,25 @@ import skimage.io
 import skimage
 import numpy
 
-dir = 'trippy'
-min_res = 128
+dir = 'trippy_vgg_res'
+min_res = 32
 
 def main():
     input = tf.placeholder(tf.float32, [None, None, 3])
-    output = local_laplacian_tf(tf.expand_dims(input, axis=0))
+    output = local_laplacian_tf(tf.expand_dims(input, axis=0), J=6)
     sess = tf.Session()
     files = os.listdir(dir)
     for file in files:
         if file.startswith('t') and file.endswith('.png'):
             in_img = skimage.img_as_float(skimage.io.imread(os.path.join(dir, file)))
             if in_img.shape[0] % min_res != 0:
+                raise
                 #dif = int((in_img.shape[0] % min_res) / 2)
                 new_res = min_res * int(numpy.floor(in_img.shape[0] / min_res))
                 #in_img = in_img[dif:dif+new_res, :, :]
                 in_img = in_img[:new_res, :, :]
             if in_img.shape[1] % min_res != 0:
+                raise
                 #dif = int((in_img.shape[1] % min_res) / 2)
                 new_res = min_res * int(numpy.floor(in_img.shape[1] / min_res))
                 #in_img = in_img[:, dif:dif+new_res, :]

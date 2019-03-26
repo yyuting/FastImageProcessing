@@ -45,10 +45,7 @@ less_aggresive_ini = False
 conv_padding = "SAME"
 padding_offset = 32
 
-deprecated_options = ['feature_reduction_channel_by_samples',
-                      'perceptual_loss',
-                      'perceptual_loss_term',
-                      'perceptual_loss_scale']
+deprecated_options = ['feature_reduction_channel_by_samples']
 
 def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True, sigmoid_scaling=False, manual_features_only=False, aux_plus_manual_features=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, first_n=-1, first_n_no_last=-1, mean_var_only=False, zero_samples=False, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None, every_nth=-1, every_nth_stratified=False, one_hop_parent=False, target_idx=[], use_manual_index=False, manual_index_file='', additional_features=True, ignore_last_n_scale=0, include_noise_feature=False, crop_h=-1, crop_w=-1, no_noise_feature=False):
     # 2x_1sample on margo
@@ -255,7 +252,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             else:
                 out_features = valid_features
 
-            if ignore_last_n_scale > 0:
+            if ignore_last_n_scale > 0 and output_type not in ['rgb', 'bgr']:
                 new_inds = numpy.arange(feature_bias.shape[0] - ignore_last_n_scale)
                 if include_noise_feature:
                     new_inds = numpy.concatenate((new_inds, [feature_bias.shape[0]-2, feature_bias.shape[0]-1]))
@@ -1310,6 +1307,9 @@ def main():
     parser.add_argument('--crop_w', dest='crop_w', type=int, default=-1, help='if specified, crop features / imgs on width dimension upon specified ind')
     parser.add_argument('--crop_h', dest='crop_h', type=int, default=-1, help='if specified, crop features / imgs on height dimension upon specified ind')
     parser.add_argument('--no_noise_feature', dest='no_noise_feature', action='store_true', help='if specified, do not include noise as additional features during training, will override include_noise_feature')
+    parser.add_argument('--perceptual_loss', dest='perceptual_loss', action='store_true',help='if specified, use perceptual loss as well as L2 loss')
+    parser.add_argument('--perceptual_loss_term', dest='perceptual_loss_term', default='conv1_1', help='specify to use which layer in vgg16 as perceptual loss')
+    parser.add_argument('--perceptual_loss_scale', dest='perceptual_loss_scale', type=float, default=0.0001, help='used to scale perceptual loss')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -1398,6 +1398,7 @@ def main():
     parser.set_defaults(additional_features=True)
     parser.set_defaults(include_noise_feature=False)
     parser.set_defaults(no_noise_feature=False)
+    parser.set_defaults(perceptual_loss=False)
 
     args = parser.parse_args()
 
@@ -1622,7 +1623,10 @@ def main_network(args):
             # a hack for oceanic aux
             color_inds = [1, 5, 6]
     else:
-        output=tf.placeholder(tf.float32,shape=[None,None,None,3])
+        if args.tiled_training:
+            output = tf.placeholder(tf.float32,shape=[None,args.tiled_h,args.tiled_w,3])
+        else:
+            output = tf.placeholder(tf.float32,shape=[None,args.input_h,args.input_w,3])
         camera_pos = tf.placeholder(dtype, shape=6)
         shader_time = tf.placeholder(dtype, shape=1)
         if args.motion_blur:
@@ -1946,6 +1950,19 @@ def main_network(args):
 
         loss += args.gradient_loss_scale * loss_add_term
 
+    if args.perceptual_loss:
+        sys.path += ['../../tensorflow-vgg']
+        import vgg16
+        vgg_in = vgg16.Vgg16()
+        vgg_in.build(network)
+        vgg_out = vgg16.Vgg16()
+        vgg_out.build(output)
+        loss_vgg = tf.reduce_mean(tf.square(getattr(vgg_in, args.perceptual_loss_term) - getattr(vgg_out, args.perceptual_loss_term)))
+        perceptual_loss_add = args.perceptual_loss_scale * loss_vgg
+        loss += perceptual_loss_add
+    else:
+        perceptual_loss_add = tf.constant(0)
+
     avg_loss = 0
     tf.summary.scalar('avg_loss', avg_loss)
 
@@ -1973,6 +1990,9 @@ def main_network(args):
     tf.summary.scalar('gradient_loss', gradient_loss)
     l2_loss = 0
     tf.summary.scalar('l2_loss', l2_loss)
+    perceptual_loss = 0
+    tf.summary.scalar('perceptual_loss', perceptual_loss)
+
 
     loss_to_opt = loss + regularizer_loss + sparsity_loss
 
@@ -2146,6 +2166,7 @@ def main_network(args):
         all_sparsity=np.zeros(int(time_vals.shape[0] * ntiles_w * ntiles_h), dtype=float)
         all_regularization = np.zeros(int(time_vals.shape[0] * ntiles_w * ntiles_h), dtype=float)
         all_training_loss = np.zeros(int(time_vals.shape[0] * ntiles_w * ntiles_h), dtype=float)
+        all_perceptual = np.zeros(int(time_vals.shape[0] * ntiles_w * ntiles_h), dtype=float)
 
         occurance = np.zeros(int(time_vals.shape[0] * ntiles_w * ntiles_h), dtype=int)
 
@@ -2298,7 +2319,7 @@ def main_network(args):
                         feed_dict[output] = output_image
                         feed_dict[alpha] = alpha_val
                         #_,current, current_l2, current_sparsity, current_regularization =sess.run([opt,loss, loss_l2, sparsity_loss, regularizer_loss],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
-                        _,current, current_l2, current_sparsity, current_regularization, current_training = sess.run([opt,loss, loss_l2, sparsity_loss, regularizer_loss, loss_to_opt],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
+                        _,current, current_l2, current_sparsity, current_regularization, current_training, current_perceptual = sess.run([opt,loss, loss_l2, sparsity_loss, regularizer_loss, loss_to_opt, perceptual_loss_add],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
                     elif args.use_queue:
                         if not printval:
                             #print("first time arriving before sess, wish me best luck")
@@ -2336,7 +2357,7 @@ def main_network(args):
                         feed_dict[shader_time] = [time_vals[frame_idx]]
                         if args.motion_blur:
                             feed_dict[camera_pos_velocity] = camera_pos_velocity_vals[frame_idx, :]
-                        _,current, current_l2, current_sparsity, current_regularization, current_training =sess.run([opt,loss, loss_l2, sparsity_loss, regularizer_loss, loss_to_opt],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
+                        _,current, current_l2, current_sparsity, current_regularization, current_training, current_perceptual =sess.run([opt,loss, loss_l2, sparsity_loss, regularizer_loss, loss_to_opt, perceptual_loss_add],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
                         #current =sess.run(loss,feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
                         if numpy.isnan(current):
                             print(frame_idx, tile_idx)
@@ -2362,6 +2383,7 @@ def main_network(args):
                     all_sparsity[permutation[start_id:end_id]]=current_sparsity*255.0*255.0
                     all_regularization[permutation[start_id:end_id]] = current_regularization * 255.0 * 255.0
                     all_training_loss[permutation[start_id:end_id]] = current_training * 255.0 * 255.0
+                    all_perceptual[permutation[start_id:end_id]] = current_perceptual * 255.0 * 255.0
                     cnt += args.batch_size if args.use_batch else 1
                     print("%d %d %.2f %.2f %.2f %s"%(epoch,cnt,current*255.0*255.0,np.mean(all[np.where(all)]),time.time()-st,os.getcwd().split('/')[-2]))
 
@@ -2372,6 +2394,7 @@ def main_network(args):
             avg_loss_sparsity = np.mean(all_sparsity)
             avg_loss_regularization = np.mean(all_regularization)
             avg_training_loss = np.mean(all_training_loss)
+            avg_perceptual = np.mean(all_perceptual)
 
             if not (args.two_stage_training and epoch <= num_epoch // 2):
                 if min_avg_loss > avg_training_loss:
@@ -2383,6 +2406,7 @@ def main_network(args):
             summary.value.add(tag='avg_loss_sparsity', simple_value=avg_loss_sparsity)
             summary.value.add(tag='avg_loss_regularization', simple_value=avg_loss_regularization)
             summary.value.add(tag='avg_training_loss', simple_value=avg_training_loss)
+            summary.value.add(tag='avg_perceptual', simple_value=avg_perceptual)
             if manual_regularize:
                 summary.value.add(tag='reg_loss', simple_value=sess.run(regularizer_loss) / args.regularizer_scale)
 
@@ -2634,6 +2658,7 @@ def main_network(args):
                             timeline_sum = 0
                             l2_loss_val = 0
                             grad_loss_val = 0
+                            perceptual_loss_val = 0
                             output_patch = numpy.zeros((1, int(height/ntiles_h), int(width/ntiles_w), 3))
                             #if not args.generate_timeline:
                             if True:
