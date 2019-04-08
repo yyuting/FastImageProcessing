@@ -15,11 +15,11 @@ MSE_ONLY = False
 #TRAIN_GROUND = '/localtmp/yuting/out_1x_1_sample/train/zigzag_plane_normal_spheres/train_img'
 #TEST_GROUND = '/bigtemp/yy2bb/out_4_sample_features_random_camera_uniform_all_features/zigzag_plane_normal_spheres/datas/test_img'
 #TRAIN_GROUND = '/bigtemp/yy2bb/out_4_sample_features_random_camera_uniform_all_features/zigzag_plane_normal_spheres/datas/train_img'
-TEST_GROUND = '/localtmp/yuting/datas_features_only/datas_feature_only/test_img'
-TRAIN_GROUND = '/localtmp/yuting/datas_features_only/datas_feature_only/train_img'
+#TEST_GROUND = '/localtmp/yuting/datas_features_only/datas_feature_only/test_img'
+#TRAIN_GROUND = '/localtmp/yuting/datas_features_only/datas_feature_only/train_img'
 
 if not MSE_ONLY:
-    sys.path += ['../../github/PerceptualSimilarity']
+    sys.path += ['../../PerceptualSimilarity']
 
     model = None
 
@@ -39,7 +39,7 @@ def compute_metric(dir1, dir2, mode, mask=None, thre=0):
         global model
         if model is None:
             cwd = os.getcwd()
-            os.chdir('../../github/PerceptualSimilarity')
+            os.chdir('../../PerceptualSimilarity')
             model = dm.DistModel()
             #model.initialize(model='net-lin',net='alex',use_gpu=True, spatial=True)
             model.initialize(model='net-lin',net='alex',use_gpu=True)
