@@ -2019,7 +2019,7 @@ def main_network(args):
     sess = tf.Session()
     #print("after start sess")
     merged = tf.summary.merge_all()
-    train_writer = tf.summary.FileWriter(args.name, sess.graph)
+
     #print("initialize local vars")
     sess.run(tf.local_variables_initializer())
     #print("initialize global vars")
@@ -2161,6 +2161,7 @@ def main_network(args):
     #print("arriving before train branch")
 
     if args.is_train:
+        train_writer = tf.summary.FileWriter(args.name, sess.graph)
         all=np.zeros(int(time_vals.shape[0] * ntiles_w * ntiles_h), dtype=float)
         all_l2=np.zeros(int(time_vals.shape[0] * ntiles_w * ntiles_h), dtype=float)
         all_sparsity=np.zeros(int(time_vals.shape[0] * ntiles_w * ntiles_h), dtype=float)
@@ -2625,6 +2626,7 @@ def main_network(args):
                     all_test = np.zeros(len(val_img_names), dtype=float)
                     all_grad = np.zeros(len(val_img_names), dtype=float)
                     all_l2 = np.zeros(len(val_img_names), dtype=float)
+                    all_perceptual = np.zeros(len(val_img_names), dtype=float)
                     for i in range(len(val_img_names)):
                         output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
                         #print("output_ground get")
@@ -2685,24 +2687,20 @@ def main_network(args):
                                     #l2_loss_patch, grad_loss_patch = sess.run([loss_l2, loss_add_term], feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
                                     st_before = time.time()
                                     #if not args.generate_timeline:
-                                    if True:
-                                        output_patch, l2_loss_patch, grad_loss_patch = sess.run([network, loss_l2, loss_add_term], feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
+                                    if not args.accurate_timing:
+                                        output_patch, l2_loss_patch, grad_loss_patch, perceptual_patch = sess.run([network, loss_l2, loss_add_term, perceptual_loss_add], feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
+                                        st_after = time.time()
                                     else:
-                                        #output_patch = sess.run(network, feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
-                                        #l2_loss_patch = 0.0
-                                        #grad_loss_patch = 0.0
-                                        #l2_loss_patch = sess.run(loss, feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
-                                        print("test without timeline recorded")
-                                        l2_loss_patch = sess.run(loss, feed_dict=tiled_feed_dict)
-                                        grad_loss_patch = 0.0
-                                    #output_patch = sess.run(network, feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
-                                    st_after = time.time()
+                                        sess.run([network])
+                                        st_after = time.time()
+                                        output_patch, l2_loss_patch, grad_loss_patch, perceptual_patch = sess.run([network, loss_l2, loss_add_term, perceptual_loss_add], feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
                                     st_sum += (st_after - st_before)
                                     print(st_after - st_before)
                                     #l2_loss_patch, grad_loss_patch = sess.run([loss_l2, loss_add_term], feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
                                     output_buffer[0, int(tile_h*height/ntiles_h):int((tile_h+1)*height/ntiles_h), int(tile_w*width/ntiles_w):int((tile_w+1)*width/ntiles_w), :] = output_patch[0, :, :, :]
                                     l2_loss_val += l2_loss_patch
                                     grad_loss_val += grad_loss_patch
+                                    perceptual_loss_val += perceptual_patch
                                     if args.generate_timeline:
                                     #if False:
                                         if i > nburns:
@@ -2722,6 +2720,7 @@ def main_network(args):
                                 output_image = output_image[:, :, :, ::-1]
                             l2_loss_val /= (ntiles_w * ntiles_h)
                             grad_loss_val /= (ntiles_w * ntiles_h)
+                            perceptual_loss_val /=  (ntiles_w * ntiles_h)
                             print("rough time estimate:", st_sum)
 
                         elif args.test_tiling:
@@ -2747,8 +2746,13 @@ def main_network(args):
                             timeline_sum = 0
                             for k in range(nruns):
                                 st_before = time.time()
-                                output_image, l2_loss_val, grad_loss_val = sess.run([network, loss_l2, loss_add_term], options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
-                                st_after = time.time()
+                                if not args.accurate_timing:
+                                    output_image, l2_loss_val, grad_loss_val, perceptual_loss_val = sess.run([network, loss_l2, loss_add_term, perceptual_loss_add], options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
+                                    st_after = time.time()
+                                else:
+                                    sess.run(network)
+                                    st_after = time.time()
+                                    output_image, l2_loss_val, grad_loss_val, perceptual_loss_val = sess.run([network, loss_l2, loss_add_term, perceptual_loss_add], options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
                                 st_sum += (st_after - st_before)
                                 if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
                                     output_buffer += output_image[:, :, :, ::-1]
@@ -2781,6 +2785,7 @@ def main_network(args):
                         all_test[i] = loss_val
                         all_l2[i] = l2_loss_val
                         all_grad[i] = grad_loss_val
+                        all_perceptual[i] = perceptual_loss_val
                         output_image=np.clip(output_image,0.0,1.0)
                         #print("output_image clipped")
                         output_image *= 255.0
@@ -3025,12 +3030,27 @@ def main_network(args):
         target=open(os.path.join(test_dirname, 'score.txt'),'w')
         target.write("%f"%np.mean(all_test[np.where(all_test)]))
         target.close()
+        target=open(os.path.join(test_dirname, 'vgg.txt'),'w')
+        target.write("%f"%np.mean(all_perceptual[np.where(all_perceptual)]))
+        target.close()
+        target=open(os.path.join(test_dirname, 'vgg_same_scale.txt'),'w')
+        target.write("%f"%np.mean(all_perceptual[np.where(all_perceptual)] * 255.0 * 255.0))
+        target.close()
         if len(val_img_names) == 30:
             score_close = np.mean(all_test[:5])
             score_far = np.mean(all_test[5:10])
             score_middle = np.mean(all_test[10:])
             target=open(os.path.join(test_dirname, 'score_breakdown.txt'),'w')
             target.write("%f, %f, %f"%(score_close, score_far, score_middle))
+            target.close()
+            perceptual_close = np.mean(all_perceptual[:5])
+            perceptual_far = np.mean(all_perceptual[5:10])
+            perceptual_middle = np.mean(all_perceptual[10:])
+            target=open(os.path.join(test_dirname, 'vgg_breakdown.txt'),'w')
+            target.write("%f, %f, %f"%(perceptual_close, perceptual_far, perceptual_middle))
+            target.close()
+            target=open(os.path.join(test_dirname, 'vgg_breakdown_same_scale.txt'),'w')
+            target.write("%f, %f, %f"%(perceptual_close * 255 * 255, perceptual_far * 255 * 255, perceptual_middle * 255 * 255))
             target.close()
 
         if args.test_training:

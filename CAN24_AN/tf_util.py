@@ -67,24 +67,35 @@ def select_nosmooth(a, b, c):
 
     all_scalar = True
     base_tensor = None
+    count = 0
     for tensor in [a, b, c]:
-        if not isinstance(tensor, (int, float)):
+        if not isinstance(tensor, (int, float, bool)):
             all_scalar = False
             base_tensor = tensor
-            break
+            count += 1
     if all_scalar:
         return b if a else c
 
-    if isinstance(b, (int, float)):
+    if base_tensor == a and count == 1:
+        actual_dtype = dtype
+    elif base_tensor != a:
+        actual_dtype = base_tensor.dtype
+    else:
+        if isinstance(b, tf.Tensor):
+            actual_dtype = b.dtype
+        else:
+            actual_dtype = c.dtype
+
+    if isinstance(b, (int, float, bool)):
         if b == 0.0:
-            b = tf.zeros_like(base_tensor, dtype=dtype)
+            b = tf.zeros_like(base_tensor, dtype=actual_dtype)
         else:
-            b = b * tf.ones_like(base_tensor, dtype=dtype)
-    if isinstance(c, (int, float)):
+            b = b * tf.ones_like(base_tensor, dtype=actual_dtype)
+    if isinstance(c, (int, float, bool)):
         if c == 0.0:
-            c = tf.zeros_like(base_tensor, dtype=dtype)
+            c = tf.zeros_like(base_tensor, dtype=actual_dtype)
         else:
-            c = c * tf.ones_like(base_tensor, dtype=dtype)
+            c = c * tf.ones_like(base_tensor, dtype=actual_dtype)
     return tf.where(tf.cast(a, bool), b, c)
 
 select = select_nosmooth
