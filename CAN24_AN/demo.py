@@ -650,6 +650,8 @@ def get_shader(x, f_log_intermediate, f_log_intermediate_subset, camera_pos, fea
                 f_log_intermediate[features_len-10] = features_dt[0]
                 f_log_intermediate[features_len-11] = features_dt[1]
 
+    if len(debug) > 0:
+        vec_output[0] = debug[0]
     if not render_g:
         if not manual_features_only:
             compiler_module.f(features, f_log_intermediate, vec_output)
@@ -672,7 +674,7 @@ def get_shader(x, f_log_intermediate, f_log_intermediate_subset, camera_pos, fea
                 features[i] = tf.cast(features[i], dtype)
             if isinstance(sigma[i], tf.Tensor):
                 sigma[i] = tf.cast(sigma[i], dtype)
-        vec_output[0] = debug[0]
+
         compiler_module.g(features, vec_output, sigma)
 
     return
@@ -1404,6 +1406,7 @@ def main():
     parser.set_defaults(no_noise_feature=False)
     parser.set_defaults(perceptual_loss=False)
     parser.set_defaults(relax_clipping=False)
+    parser.set_defaults(preload_grad=False)
 
     args = parser.parse_args()
 
@@ -2163,6 +2166,15 @@ def main_network(args):
             read_ind(eval_out_images, val_img_names, id, False)
             eval_out_images[id] = np.expand_dims(eval_out_images[id], axis=0)
 
+    if args.preload and args.is_train:
+        output_images=[None]*len(input_names)
+        all_grads = [None] * len(input_names)
+        for id in range(len(input_names)):
+            output_images[id] = np.expand_dims(read_name(output_names[id], False), axis=0)
+            if args.gradient_loss:
+                all_grads[id] = read_name(grad_names[id], True)
+            print(id)
+
     #print("arriving before train branch")
 
     if args.is_train:
@@ -2295,7 +2307,10 @@ def main_network(args):
                     if args.use_weight_map or args.gradient_loss_canny_weight:
                         feed_dict[weight_map] = np.expand_dims(read_name(map_names[frame_idx], True), axis=0)
                     if args.gradient_loss:
-                        grad_arr = read_name(grad_names[frame_idx], True)
+                        if not args.preload:
+                            grad_arr = read_name(grad_names[frame_idx], True)
+                        else:
+                            grad_arr = all_grads[frame_idx]
                         feed_dict[canny_edge] = grad_arr[:, :, :, 0]
                         if args.grayscale_grad:
                             feed_dict[dx_ground] = grad_arr[:, :, :, 1:2]
@@ -2332,7 +2347,10 @@ def main_network(args):
                             printval = True
                         _,current=sess.run([opt,loss],feed_dict={alpha: alpha_val}, options=run_options, run_metadata=run_metadata)
                     else:
-                        output_arr = np.expand_dims(read_name(output_names[frame_idx], False), axis=0)
+                        if not args.preload:
+                            output_arr = np.expand_dims(read_name(output_names[frame_idx], False), axis=0)
+                        else:
+                            output_arr = output_images[frame_idx]
                         #output_arr = numpy.ones([1, args.input_h, args.input_w, 3])
                         if train_from_queue:
                             output_arr = output_arr[..., ::-1]
