@@ -549,6 +549,8 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
             vector3 = [vector3[0], vector3[1], vector3[2] + render_sigma[2] * sample3, render_sigma[2] * sample3]
     else:
         vector3 = [tensor_x0, tensor_x1, tensor_x2]
+        sample1 = tf.zeros_like(sample1)
+        sample2 = tf.zeros_like(sample2)
         #print("using zero samples")
         if camera_pos_velocity is not None:
             vector3 = [vector3[0], vector3[1], vector3[2] + render_sigma[2] * sample3, 0.0]
@@ -557,6 +559,8 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     f_log_intermediate[1] = camera_pos
     get_shader(vector3, f_log_intermediate, f_log_intermediate_subset, camera_pos, features_len, manual_features_len, shader_name=shader_name, color_inds=color_inds, vec_output=vec_output, compiler_module=compiler_module, geometry=geometry, debug=debug, extra_args=extra_args, render_g=render_g, manual_features_only=manual_features_only, aux_plus_manual_features=aux_plus_manual_features, fov=fov, camera_pos_velocity=camera_pos_velocity, features_len_add=features_len_add, manual_depth_offset=manual_depth_offset, additional_features=additional_features)
 
+    # TODO: potential bug here
+    # what to put if zero_samples = True
     if not no_noise_feature:
         if (additional_features or include_noise_feature):
             f_log_intermediate[features_len-2] = sample1
@@ -1316,6 +1320,7 @@ def main():
     parser.add_argument('--perceptual_loss_term', dest='perceptual_loss_term', default='conv1_1', help='specify to use which layer in vgg16 as perceptual loss')
     parser.add_argument('--perceptual_loss_scale', dest='perceptual_loss_scale', type=float, default=0.0001, help='used to scale perceptual loss')
     parser.add_argument('--relax_clipping', dest='relax_clipping', action='store_true', help='if specified relax the condition of clipping features from 0-1 to -1-2')
+    parser.add_argument('--train_with_zero_samples', dest='train_with_zero_samples', action='store_true', help='if specified, only use center of pixel for training')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -1407,6 +1412,7 @@ def main():
     parser.set_defaults(perceptual_loss=False)
     parser.set_defaults(relax_clipping=False)
     parser.set_defaults(preload_grad=False)
+    parser.set_defaults(train_with_zero_samples=False)
 
     args = parser.parse_args()
 
@@ -1720,6 +1726,9 @@ def main_network(args):
                 else:
                     target_idx = numpy.random.choice(args.input_nc, args.sparsity_target_channel, replace=False).astype('i')
                     numpy.save(target_idx_file, target_idx)
+
+            if args.train_with_zero_samples:
+                zero_samples = True
 
             input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection, sigmoid_scaling=args.sigmoid_scaling, manual_features_only=args.manual_features_only, aux_plus_manual_features=args.aux_plus_manual_features, efficient_trace=args.efficient_trace, collect_loop_statistic=args.collect_loop_statistic, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=feed_samples, fov=args.fov, camera_pos_velocity=camera_pos_velocity, first_last_only=args.first_last_only, last_only=args.last_only, subsample_loops=args.subsample_loops, last_n=args.last_n, first_n=args.first_n, first_n_no_last=args.first_n_no_last, mean_var_only=args.mean_var_only, zero_samples=zero_samples, render_fix_spatial_sample=args.render_fix_spatial_sample, render_fix_temporal_sample=args.render_fix_temporal_sample, render_zero_spatial_sample=args.render_zero_spatial_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples, every_nth=args.every_nth, every_nth_stratified=args.every_nth_stratified, one_hop_parent=args.one_hop_parent, target_idx=target_idx, use_manual_index=args.use_manual_index, manual_index_file=args.manual_index_file, additional_features=args.additional_features, ignore_last_n_scale=args.ignore_last_n_scale, include_noise_feature=args.include_noise_feature, crop_h=args.crop_h, crop_w=args.crop_w, no_noise_feature=args.no_noise_feature, relax_clipping=args.relax_clipping)
 

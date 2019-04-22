@@ -43,8 +43,11 @@ def new_mul(x, y):
             return 0.0
     except:
         pass
-    if x.dtype == bool and y.dtype == bool:
-        return tf.logical_and(x, y)
+    try:
+        if x.dtype == bool and y.dtype == bool:
+            return tf.logical_and(x, y)
+    except:
+        pass
     return tf.multiply(x, y)
 
 def new_add(x, y):
@@ -90,12 +93,18 @@ def select_nosmooth(a, b, c):
         if b == 0.0:
             b = tf.zeros_like(base_tensor, dtype=actual_dtype)
         else:
-            b = b * tf.ones_like(base_tensor, dtype=actual_dtype)
+            if actual_dtype == tf.bool:
+                b = tf.ones_like(base_tensor, dtype=actual_dtype)
+            else:
+                b = b * tf.ones_like(base_tensor, dtype=actual_dtype)
     if isinstance(c, (int, float, bool)):
         if c == 0.0:
             c = tf.zeros_like(base_tensor, dtype=actual_dtype)
         else:
-            c = c * tf.ones_like(base_tensor, dtype=actual_dtype)
+            if actual_dtype == tf.bool:
+                c = tf.ones_like(base_tensor, dtype=actual_dtype)
+            else:
+                c = c * tf.ones_like(base_tensor, dtype=actual_dtype)
     return tf.where(tf.cast(a, bool), b, c)
 
 select = select_nosmooth
