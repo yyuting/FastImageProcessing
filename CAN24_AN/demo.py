@@ -97,7 +97,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
         elif shader_name == 'trippy_heart':
             shader_args = ' render_trippy_heart ' + geometry + ' none'
         elif shader_name == 'oceanic':
-            shader_args = ' render_oceanic ' + geometry + ' none'
+            shader_args = ' render_oceanic_simple ' + geometry + ' none'
 
         render_util_dir = os.path.abspath('../../global_opt/proj/apps')
         render_single_full_name = os.path.abspath(os.path.join(render_util_dir, 'render_single.py'))
@@ -1321,6 +1321,7 @@ def main():
     parser.add_argument('--perceptual_loss_scale', dest='perceptual_loss_scale', type=float, default=0.0001, help='used to scale perceptual loss')
     parser.add_argument('--relax_clipping', dest='relax_clipping', action='store_true', help='if specified relax the condition of clipping features from 0-1 to -1-2')
     parser.add_argument('--train_with_zero_samples', dest='train_with_zero_samples', action='store_true', help='if specified, only use center of pixel for training')
+    parser.add_argument('--tile_only', dest='tile_only', action='store_true', help='if specified, render only tiles (part of an entire image) according to tile_start')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -1413,6 +1414,7 @@ def main():
     parser.set_defaults(relax_clipping=False)
     parser.set_defaults(preload_grad=False)
     parser.set_defaults(train_with_zero_samples=False)
+    parser.set_defaults(tile_only=False)
 
     args = parser.parse_args()
 
@@ -1460,6 +1462,7 @@ def copy_option(args):
     delattr(new_args, 'sparsity_vec_histogram')
     delattr(new_args, 'automatic_find_gpu')
     delattr(new_args, 'ignore_last_n_scale')
+    delattr(new_args, 'tile_only')
     return new_args
 
 def main_network(args):
@@ -1558,9 +1561,11 @@ def main_network(args):
     if args.mean_estimator_memory_efficient:
         assert not args.generate_timeline
 
-    if args.tiled_training:
+    if args.tiled_training or args.tile_only:
         global conv_padding
         conv_padding = "VALID"
+
+    if args.tiled_training:
         assert width % args.tiled_w == 0
         assert height % args.tiled_h == 0
         ntiles_w = width / args.tiled_w
@@ -1637,7 +1642,7 @@ def main_network(args):
             # a hack for oceanic aux
             color_inds = [1, 5, 6]
     else:
-        if args.tiled_training:
+        if args.tiled_training or args.tile_only:
             output = tf.placeholder(tf.float32,shape=[None,args.tiled_h,args.tiled_w,3])
         else:
             output = tf.placeholder(tf.float32,shape=[None,args.input_h,args.input_w,3])
@@ -1668,12 +1673,12 @@ def main_network(args):
             #print("sample count", shader_samples)
             feature_w = []
             color_inds = []
-            if args.tiled_training:
+            if args.tiled_training or args.tile_only:
                 h_start = tf.placeholder(dtype=dtype, shape=())
                 w_start = tf.placeholder(dtype=dtype, shape=())
-                h_offset = height / ntiles_h + padding_offset
-                w_offset = width / ntiles_w + padding_offset
-                if args.is_train:
+                h_offset = args.tiled_h + padding_offset
+                w_offset = args.tiled_w + padding_offset
+                if args.is_train or args.tile_only:
                     feed_samples = None
                 else:
                     # for inference, need to ensure that noise samples used within an image is the same
@@ -1737,7 +1742,7 @@ def main_network(args):
                 print("random target channel")
                 print(target_idx)
 
-            if args.tiled_training and args.mean_estimator:
+            if (args.tiled_training or args.tile_only) and args.mean_estimator:
                 input_to_network = tf.slice(input_to_network, [0, padding_offset // 2, padding_offset // 2, 0], [args.estimator_samples, args.tiled_h, args.tiled_w, 3])
             args.input_nc = int(input_to_network.shape[-1])
             color_inds = color_inds[::-1]
@@ -2122,6 +2127,8 @@ def main_network(args):
         time_vals = np.load(os.path.join(args.dataroot, 'train_time.npy'))
         if args.motion_blur:
             camera_pos_velocity_vals = np.load(os.path.join(args.dataroot, 'train_velocity.npy'))
+        if args.tile_only:
+            tile_start_vals = np.load(os.path.join(args.dataroot, 'train_start.npy'))
     else:
         if not args.motion_blur:
             camera_pos_vals = np.concatenate((
@@ -2383,6 +2390,10 @@ def main_network(args):
                             feed_dict[h_start] = tile_h * height / ntiles_h - padding_offset / 2
                             feed_dict[w_start] = tile_w * width / ntiles_w - padding_offset / 2
 
+                        if args.tile_only:
+                            feed_dict[h_start] = tile_start_vals[frame_idx, 0]
+                            feed_dict[w_start] = tile_start_vals[frame_idx, 1]
+
                         feed_dict[output] = output_arr
 
                         camera_val = camera_pos_vals[frame_idx, :]
@@ -2518,6 +2529,8 @@ def main_network(args):
                 time_vals = np.load(os.path.join(args.dataroot, 'train_time.npy'))
                 if args.motion_blur:
                     camera_pos_velocity_vals = np.load(os.path.join(args.dataroot, 'train_velocity.npy'))
+                if args.tile_only:
+                    tile_start_vals = np.load(os.path.join(args.dataroot, 'train_start.npy'))
             else:
                 if not args.motion_blur:
                     camera_pos_vals = np.concatenate((
@@ -2683,6 +2696,9 @@ def main_network(args):
                         #print("feed_dict generated")
                         #pctx.trace_next_step()
                         #pctx.dump_next_step()
+                        if args.tile_only:
+                            feed_dict[h_start] = tile_start_vals[i, 0]
+                            feed_dict[w_start] = tile_start_vals[i, 1]
                         feed_dict[output] = output_ground
                         output_buffer = numpy.zeros(output_ground.shape)
 
