@@ -491,12 +491,15 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
         tensor_x0 = tf.constant(xv, dtype=dtype)
         tensor_x1 = tf.constant(yv, dtype=dtype)
     xv, yv = tf.meshgrid(w_start + tf.range(w_offset, dtype=dtype), h_start + tf.range(h_offset, dtype=dtype), indexing='ij')
+    #xv, yv = tf.meshgrid(tf.range(w_offset, dtype=dtype), tf.range(h_offset, dtype=dtype), indexing='ij')
     xv = tf.transpose(xv)
     yv = tf.transpose(yv)
     xv = tf.expand_dims(xv, 0)
     yv = tf.expand_dims(yv, 0)
     xv = tf.tile(xv, [nsamples, 1, 1])
     yv = tf.tile(yv, [nsamples, 1, 1])
+    #xv += w_start
+    #yv += h_start
     tensor_x0 = xv
     tensor_x1 = yv
     #tensor_x2 = shader_time * tf.constant(1.0, dtype=dtype, shape=xv.shape)
@@ -2283,6 +2286,7 @@ def main_network(args):
                     nupdates = int(time_vals.shape[0] * ntiles_h * ntiles_w)
                     nupdates /= sub_epochs
                     nupdates = int(nupdates)
+                    nupdates /= args.batch_size
                     # randomly permute indices to prevent sort always returning the same order
                     base_permutation = np.random.permutation(int(time_vals.shape[0] * ntiles_h * ntiles_w))
                     if args.dynamic_training_mode == 2:
@@ -2391,8 +2395,8 @@ def main_network(args):
                             feed_dict[w_start] = tile_w * width / ntiles_w - padding_offset / 2
 
                         if args.tile_only:
-                            feed_dict[h_start] = tile_start_vals[frame_idx, 0]
-                            feed_dict[w_start] = tile_start_vals[frame_idx, 1]
+                            feed_dict[h_start] = tile_start_vals[frame_idx, 0] - padding_offset / 2
+                            feed_dict[w_start] = tile_start_vals[frame_idx, 1] - padding_offset / 2
 
                         feed_dict[output] = output_arr
 
@@ -2697,8 +2701,8 @@ def main_network(args):
                         #pctx.trace_next_step()
                         #pctx.dump_next_step()
                         if args.tile_only:
-                            feed_dict[h_start] = tile_start_vals[i, 0]
-                            feed_dict[w_start] = tile_start_vals[i, 1]
+                            feed_dict[h_start] = tile_start_vals[i, 0] - padding_offset / 2
+                            feed_dict[w_start] = tile_start_vals[i, 1] - padding_offset / 2
                         feed_dict[output] = output_ground
                         output_buffer = numpy.zeros(output_ground.shape)
 
