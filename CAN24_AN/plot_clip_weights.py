@@ -5,9 +5,14 @@ from matplotlib import pyplot
 import sys
 import skimage.measure
 import numpy
+import numpy as np
 import skimage.io
 from skimage.morphology import disk, dilation
 import skimage.feature
+
+#os.system('nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp')
+#os.environ['CUDA_VISIBLE_DEVICES']=str(np.argmax([int(x.split()[2]) for x in open('tmp','r').readlines()]))
+#os.system('rm tmp')
 
 MSE_ONLY = False
 
@@ -45,6 +50,15 @@ def compute_metric(dir1, dir2, mode, mask=None, thre=0):
             model.initialize(model='net-lin',net='alex',use_gpu=True)
             print('Model [%s] initialized'%model.name())
             os.chdir(cwd)
+
+    if mode == 'perceptual_tf':
+        sys.path += ['../../lpips-tensorflow']
+        import lpips_tf
+        import tensorflow as tf
+        image0_ph = tf.placeholder(tf.float32, [1, None, None, 3])
+        image1_ph = tf.placeholder(tf.float32, [1, None, None, 3])
+        distance_t = lpips_tf.lpips(image0_ph, image1_ph, model='net-lin', net='alex')
+        sess = tf.Session()
 
     if mode == 'l2_with_gradient':
         import demo
@@ -124,6 +138,10 @@ def compute_metric(dir1, dir2, mode, mask=None, thre=0):
             img2 = util.im2tensor(util.load_image(os.path.join(dir2, img_files2[ind])))
             #vals[ind] = numpy.mean(model.forward(img1, img2)[0])
             metric_val = numpy.expand_dims(model.forward(img1, img2), axis=2)
+        elif mode == 'perceptual_tf':
+            img1 = np.expand_dims(skimage.img_as_float(skimage.io.imread(os.path.join(dir1, img_files1[ind]))), axis=0)
+            img2 = np.expand_dims(skimage.img_as_float(skimage.io.imread(os.path.join(dir2, img_files2[ind]))), axis=0)
+            metric_val = sess.run(distance_t, feed_dict={image0_ph: img1, image1_ph: img2})
         else:
             raise
 
@@ -147,7 +165,7 @@ def compute_metric(dir1, dir2, mode, mask=None, thre=0):
         target=open(os.path.join(dir1, filename_breakdown),'w')
         target.write("%f, %f, %f"%(numpy.mean(vals[:5]), numpy.mean(vals[5:10]), numpy.mean(vals[10:])))
         target.close()
-    if mode == 'l2_with_gradient':
+    if mode in ['l2_with_gradient', 'perceptual_tf']:
         sess.close()
     return vals
 
@@ -282,9 +300,11 @@ def get_score(name):
             mode = sys.argv[3]
         else:
             mode = None
-        if mode in ['l2', 'ssim', 'perceptual', 'l2_with_gradient']:
+        if mode in ['l2', 'ssim', 'perceptual', 'l2_with_gradient', 'perceptual_tf']:
+            print('running mode', mode)
             compute_metric(name, sys.argv[2], mode)
         else:
+            print('running all mode')
             compute_metric(name, sys.argv[2], 'ssim')
             compute_metric(name, sys.argv[2], 'perceptual')
             compute_metric(name, sys.argv[2], 'l2')
