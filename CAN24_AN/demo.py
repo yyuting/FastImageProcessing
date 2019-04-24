@@ -490,20 +490,20 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
         yv_final = np.repeat(yv, nsamples, axis=0)
         tensor_x0 = tf.constant(xv, dtype=dtype)
         tensor_x1 = tf.constant(yv, dtype=dtype)
-    xv, yv = tf.meshgrid(w_start + tf.range(w_offset, dtype=dtype), h_start + tf.range(h_offset, dtype=dtype), indexing='ij')
-    #xv, yv = tf.meshgrid(tf.range(w_offset, dtype=dtype), tf.range(h_offset, dtype=dtype), indexing='ij')
+    #xv, yv = tf.meshgrid(w_start + tf.range(w_offset, dtype=dtype), h_start + tf.range(h_offset, dtype=dtype), indexing='ij')
+    xv, yv = tf.meshgrid(tf.range(w_offset, dtype=dtype), tf.range(h_offset, dtype=dtype), indexing='ij')
     xv = tf.transpose(xv)
     yv = tf.transpose(yv)
     xv = tf.expand_dims(xv, 0)
     yv = tf.expand_dims(yv, 0)
     xv = tf.tile(xv, [nsamples, 1, 1])
     yv = tf.tile(yv, [nsamples, 1, 1])
-    #xv += w_start
-    #yv += h_start
+    xv += tf.expand_dims(tf.expand_dims(w_start, axis=1), axis=2)
+    yv += tf.expand_dims(tf.expand_dims(h_start, axis=1), axis=2)
     tensor_x0 = xv
     tensor_x1 = yv
     #tensor_x2 = shader_time * tf.constant(1.0, dtype=dtype, shape=xv.shape)
-    tensor_x2 = shader_time * tf.cast(tf.fill(tf.shape(xv), 1.0), dtype)
+    tensor_x2 = tf.expand_dims(tf.expand_dims(shader_time, axis=1), axis=2) * tf.cast(tf.fill(tf.shape(xv), 1.0), dtype)
 
     if samples is None:
         #print("creating random samples")
@@ -708,6 +708,12 @@ def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None], f
         ang1 = camera_pos[3] + camera_pos_velocity[3] * x[3]
         ang2 = camera_pos[4] + camera_pos_velocity[4] * x[3]
         ang3 = camera_pos[5] + camera_pos_velocity[5] * x[3]
+
+    for i in range(len(ray_origin)):
+        ray_origin[i] = tf.expand_dims(tf.expand_dims(ray_origin[i], axis=1), axis=2)
+    ang1 = tf.expand_dims(tf.expand_dims(ang1, axis=1), axis=2)
+    ang2 = tf.expand_dims(tf.expand_dims(ang2, axis=1), axis=2)
+    ang3 = tf.expand_dims(tf.expand_dims(ang3, axis=1), axis=2)
 
     ray_dir_norm = tf.sqrt(ray_dir[0] **2 + ray_dir[1] ** 2 + ray_dir[2] ** 2)
     ray_dir[0] /= ray_dir_norm
@@ -1325,6 +1331,10 @@ def main():
     parser.add_argument('--relax_clipping', dest='relax_clipping', action='store_true', help='if specified relax the condition of clipping features from 0-1 to -1-2')
     parser.add_argument('--train_with_zero_samples', dest='train_with_zero_samples', action='store_true', help='if specified, only use center of pixel for training')
     parser.add_argument('--tile_only', dest='tile_only', action='store_true', help='if specified, render only tiles (part of an entire image) according to tile_start')
+    parser.add_argument('--no_summary', dest='write_summary', action='store_false', help='if specified, do not write train result to summary')
+    parser.add_argument('--lpips_loss', dest='lpips_loss', action='store_true', help='if specified, use perceptual loss from Richard Zhang paepr')
+    parser.add_argument('--lpips_loss_scale', dest='lpips_loss_scale', type=float, default=1.0, help='specifies the scale of lpips loss')
+    parser.add_argument('--no_l2_loss', dest='l2_loss', action='store_false', help='if specified, do not use l2 loss')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -1418,6 +1428,9 @@ def main():
     parser.set_defaults(preload_grad=False)
     parser.set_defaults(train_with_zero_samples=False)
     parser.set_defaults(tile_only=False)
+    parser.set_defaults(write_summary=True)
+    parser.set_defautls(lpips_loss=False)
+    parser.set_defaults(l2_loss=True)
 
     args = parser.parse_args()
 
@@ -1466,6 +1479,7 @@ def copy_option(args):
     delattr(new_args, 'automatic_find_gpu')
     delattr(new_args, 'ignore_last_n_scale')
     delattr(new_args, 'tile_only')
+    delattr(new_args, 'write_summary')
     return new_args
 
 def main_network(args):
@@ -1505,6 +1519,12 @@ def main_network(args):
             open(option_file, 'w').write(str(option_copy))
     else:
         open(option_file, 'w').write(str(option_copy))
+
+    # for simplicity, only allow batch_size=1 for inference
+    # TODO: can come back to relax this contrain.
+    if not args.is_train:
+        args.use_batch = False
+        args.batch_size = 1
 
     assert np.log2(args.upsample_scale) == int(np.log2(args.upsample_scale))
     deconv_layers = int(np.log2(args.upsample_scale))
@@ -1649,8 +1669,8 @@ def main_network(args):
             output = tf.placeholder(tf.float32,shape=[None,args.tiled_h,args.tiled_w,3])
         else:
             output = tf.placeholder(tf.float32,shape=[None,args.input_h,args.input_w,3])
-        camera_pos = tf.placeholder(dtype, shape=6)
-        shader_time = tf.placeholder(dtype, shape=1)
+        camera_pos = tf.placeholder(dtype, shape=[6, args.batch_size])
+        shader_time = tf.placeholder(dtype, shape=args.batch_size)
         if args.motion_blur:
             camera_pos_velocity = tf.placeholder(dtype, shape=6)
         else:
@@ -1670,15 +1690,15 @@ def main_network(args):
             if args.mean_estimator and not args.mean_estimator_memory_efficient:
                 shader_samples = args.estimator_samples
             else:
-                shader_samples = 1
+                shader_samples = args.batch_size
             if args.full_resolution:
                 shader_samples /= (args.upsample_scale ** 2)
             #print("sample count", shader_samples)
             feature_w = []
             color_inds = []
             if args.tiled_training or args.tile_only:
-                h_start = tf.placeholder(dtype=dtype, shape=())
-                w_start = tf.placeholder(dtype=dtype, shape=())
+                h_start = tf.placeholder(dtype=dtype, shape=args.batch_size)
+                w_start = tf.placeholder(dtype=dtype, shape=args.batch_size)
                 h_offset = args.tiled_h + padding_offset
                 w_offset = args.tiled_w + padding_offset
                 if args.is_train or args.tile_only:
@@ -1686,7 +1706,7 @@ def main_network(args):
                 else:
                     # for inference, need to ensure that noise samples used within an image is the same
                     if not args.mean_estimator:
-                        feed_samples = [tf.placeholder(dtype=dtype, shape=[1, height+padding_offset, width+padding_offset]), tf.placeholder(dtype=dtype, shape=[1, height+padding_offset, width+padding_offset])]
+                        feed_samples = [tf.placeholder(dtype=dtype, shape=[args.batch_size, height+padding_offset, width+padding_offset]), tf.placeholder(dtype=dtype, shape=[args.batch_size, height+padding_offset, width+padding_offset])]
                     else:
                         feed_samples = [tf.placeholder(dtype=dtype, shape=[args.estimator_samples, height+padding_offset, width+padding_offset]), tf.placeholder(dtype=dtype, shape=[args.estimator_samples, height+padding_offset, width+padding_offset])]
 
@@ -1930,14 +1950,17 @@ def main_network(args):
         diff = tf.abs(diff)
     powered_diff = diff ** args.RGB_norm
 
-    if not args.use_weight_map:
-        loss=tf.reduce_mean(powered_diff)
-    else:
-        loss_map = tf.reduce_mean(powered_diff, axis=3)
-        if args.weight_map_add:
-            loss = tf.reduce_mean(powered_diff) + tf.reduce_mean(loss_map * weight_map)
+    if args.l2_loss:
+        if not args.use_weight_map:
+            loss = tf.reduce_mean(powered_diff)
         else:
-            loss = tf.reduce_mean(loss_map * weight_map)
+            loss_map = tf.reduce_mean(powered_diff, axis=3)
+            if args.weight_map_add:
+                loss = tf.reduce_mean(powered_diff) + tf.reduce_mean(loss_map * weight_map)
+            else:
+                loss = tf.reduce_mean(loss_map * weight_map)
+    else:
+        loss = 0
 
     loss_l2 = loss
     loss_add_term = loss
@@ -1985,8 +2008,15 @@ def main_network(args):
         loss_vgg = tf.reduce_mean(tf.square(getattr(vgg_in, args.perceptual_loss_term) - getattr(vgg_out, args.perceptual_loss_term)))
         perceptual_loss_add = args.perceptual_loss_scale * loss_vgg
         loss += perceptual_loss_add
+    elif args.lpips_loss:
+        sys.path += ['../../lpips-tensorflow']
+        import lpips_tf
+        loss_lpips = lpips_tf.lpips(network, output, model='net-lin', net='alex')
+        perceptual_loss_add = args.lpips_loss_scale * loss_lpips
+        loss += perceptual_loss_add
     else:
         perceptual_loss_add = tf.constant(0)
+
 
     avg_loss = 0
     tf.summary.scalar('avg_loss', avg_loss)
@@ -2186,18 +2216,25 @@ def main_network(args):
             eval_out_images[id] = np.expand_dims(eval_out_images[id], axis=0)
 
     if args.preload and args.is_train:
-        output_images=[None]*len(input_names)
+        #output_images=[None]*len(input_names)
+        if args.tile_only:
+            output_images = np.empty([len(input_names), args.tiled_h, args.tiled_w, 3])
+        else:
+            output_images = np.empty([len(input_names), args.input_h, args.input_w, 3])
         all_grads = [None] * len(input_names)
         for id in range(len(input_names)):
-            output_images[id] = np.expand_dims(read_name(output_names[id], False), axis=0)
+            #output_images[id] = np.expand_dims(read_name(output_names[id], False), axis=0)
+            output_images[id, :, :, :] = read_name(output_names[id], False)
             if args.gradient_loss:
                 all_grads[id] = read_name(grad_names[id], True)
             print(id)
+        #output_images = np.stack(output_images, axis=0)
 
     #print("arriving before train branch")
 
     if args.is_train:
-        train_writer = tf.summary.FileWriter(args.name, sess.graph)
+        if args.write_summary:
+            train_writer = tf.summary.FileWriter(args.name, sess.graph)
         all=np.zeros(int(time_vals.shape[0] * ntiles_w * ntiles_h), dtype=float)
         all_l2=np.zeros(int(time_vals.shape[0] * ntiles_w * ntiles_h), dtype=float)
         all_sparsity=np.zeros(int(time_vals.shape[0] * ntiles_w * ntiles_h), dtype=float)
@@ -2310,12 +2347,16 @@ def main_network(args):
                     occurance[permutation] += 1
 
                 for i in range(nupdates):
-                    frame_idx = int(permutation[i] // (ntiles_w * ntiles_h))
-                    tile_idx = int(permutation[i] % (ntiles_w * ntiles_h))
+
 
                     st=time.time()
                     start_id = i * args.batch_size
                     end_id = min(permutation.shape[0], (i+1)*args.batch_size)
+
+                    #frame_idx = int(permutation[i] // (ntiles_w * ntiles_h))
+                    #tile_idx = int(permutation[i] % (ntiles_w * ntiles_h))
+                    frame_idx = (permutation[start_id:end_id] / (ntiles_w * ntiles_h)).astype('i')
+                    tile_idx = (permutation[start_id:end_id] % (ntiles_w * ntiles_h)).astype('i')
 
                     if False:
                         run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
@@ -2368,13 +2409,22 @@ def main_network(args):
                         _,current=sess.run([opt,loss],feed_dict={alpha: alpha_val}, options=run_options, run_metadata=run_metadata)
                     else:
                         if not args.preload:
-                            output_arr = np.expand_dims(read_name(output_names[frame_idx], False), axis=0)
+                            if args.tile_only:
+                                output_arr = np.empty([args.batch_size, args.tiled_h, args.tiled_w, 3])
+                            else:
+                                output_arr = np.empty([args.batch_size, args.input_h, args.input_w, 3])
+                            for img_idx in range(frame_idx.shape[0]):
+                                output_arr[img_idx, :, :, :] = read_name(output_names[frame_idx[img_idx]], False)
+                            #output_arr = np.expand_dims(read_name(output_names[frame_idx], False), axis=0)
                         else:
                             output_arr = output_images[frame_idx]
                         #output_arr = numpy.ones([1, args.input_h, args.input_w, 3])
                         if train_from_queue:
                             output_arr = output_arr[..., ::-1]
                         if args.tiled_training:
+                            # TODO: finish logic when batch_size > 1
+                            assert args.batch_size == 1
+                            tile_idx = tile_idx[0]
                             # check if this tiled patch is all balck, if so skip this iter
                             tile_h = tile_idx // ntiles_w
                             tile_w  = tile_idx % ntiles_w
@@ -2391,8 +2441,8 @@ def main_network(args):
                                     else:
                                         tiled_value = value[:, int(tile_h*height/ntiles_h):int((tile_h+1)*height/ntiles_h), int(tile_w*width/ntiles_w):int((tile_w+1)*width/ntiles_w), :]
                                     feed_dict[key] = tiled_value
-                            feed_dict[h_start] = tile_h * height / ntiles_h - padding_offset / 2
-                            feed_dict[w_start] = tile_w * width / ntiles_w - padding_offset / 2
+                            feed_dict[h_start] = numpy.array([tile_h * height / ntiles_h - padding_offset / 2])
+                            feed_dict[w_start] = numpy.array([tile_w * width / ntiles_w - padding_offset / 2])
 
                         if args.tile_only:
                             feed_dict[h_start] = tile_start_vals[frame_idx, 0] - padding_offset / 2
@@ -2400,9 +2450,9 @@ def main_network(args):
 
                         feed_dict[output] = output_arr
 
-                        camera_val = camera_pos_vals[frame_idx, :]
+                        camera_val = camera_pos_vals[frame_idx, :].transpose()
                         feed_dict[camera_pos] = camera_val
-                        feed_dict[shader_time] = [time_vals[frame_idx]]
+                        feed_dict[shader_time] = time_vals[frame_idx]
                         if args.motion_blur:
                             feed_dict[camera_pos_velocity] = camera_pos_velocity_vals[frame_idx, :]
                         _,current, current_l2, current_sparsity, current_regularization, current_training, current_perceptual =sess.run([opt,loss, loss_l2, sparsity_loss, regularizer_loss, loss_to_opt, perceptual_loss_add],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
@@ -2448,49 +2498,50 @@ def main_network(args):
                 if min_avg_loss > avg_training_loss:
                     min_avg_loss = avg_training_loss
 
-            summary = tf.Summary()
-            summary.value.add(tag='avg_loss', simple_value=avg_loss)
-            summary.value.add(tag='avg_loss_l2', simple_value=avg_loss_l2)
-            summary.value.add(tag='avg_loss_sparsity', simple_value=avg_loss_sparsity)
-            summary.value.add(tag='avg_loss_regularization', simple_value=avg_loss_regularization)
-            summary.value.add(tag='avg_training_loss', simple_value=avg_training_loss)
-            summary.value.add(tag='avg_perceptual', simple_value=avg_perceptual)
-            if manual_regularize:
-                summary.value.add(tag='reg_loss', simple_value=sess.run(regularizer_loss) / args.regularizer_scale)
+            if args.write_summary:
+                summary = tf.Summary()
+                summary.value.add(tag='avg_loss', simple_value=avg_loss)
+                summary.value.add(tag='avg_loss_l2', simple_value=avg_loss_l2)
+                summary.value.add(tag='avg_loss_sparsity', simple_value=avg_loss_sparsity)
+                summary.value.add(tag='avg_loss_regularization', simple_value=avg_loss_regularization)
+                summary.value.add(tag='avg_training_loss', simple_value=avg_training_loss)
+                summary.value.add(tag='avg_perceptual', simple_value=avg_perceptual)
+                if manual_regularize:
+                    summary.value.add(tag='reg_loss', simple_value=sess.run(regularizer_loss) / args.regularizer_scale)
 
-            if args.collect_validate_while_training:
-                all_test=np.zeros(len(val_names), dtype=float)
-                for ind in range(len(val_names)):
-                    if not args.use_queue:
-                        if args.preload:
-                            input_image = eval_images[ind]
-                            output_image = eval_out_images[ind]
+                if args.collect_validate_while_training:
+                    all_test=np.zeros(len(val_names), dtype=float)
+                    for ind in range(len(val_names)):
+                        if not args.use_queue:
+                            if args.preload:
+                                input_image = eval_images[ind]
+                                output_image = eval_out_images[ind]
+                            else:
+                                input_image = np.expand_dims(read_name(val_names[ind], args.is_npy, args.is_bin), axis=0)
+                                output_image = np.expand_dims(read_name(val_names[ind], False, False), axis=0)
+                            if input_image is None:
+                                continue
+                            st=time.time()
+                            current=sess.run(loss,feed_dict={input:input_image, output: output_image, alpha: alpha_val})
+                            print("%.3f"%(time.time()-st))
                         else:
-                            input_image = np.expand_dims(read_name(val_names[ind], args.is_npy, args.is_bin), axis=0)
-                            output_image = np.expand_dims(read_name(val_names[ind], False, False), axis=0)
-                        if input_image is None:
-                            continue
-                        st=time.time()
-                        current=sess.run(loss,feed_dict={input:input_image, output: output_image, alpha: alpha_val})
-                        print("%.3f"%(time.time()-st))
-                    else:
-                        st=time.time()
-                        current=sess.run(loss,feed_dict={alpha: alpha_val})
-                        print("%.3f"%(time.time()-st))
-                    all_test[ind] = current * 255.0 * 255.0
+                            st=time.time()
+                            current=sess.run(loss,feed_dict={alpha: alpha_val})
+                            print("%.3f"%(time.time()-st))
+                        all_test[ind] = current * 255.0 * 255.0
 
-                avg_test_close = np.mean(all_test[:5])
-                avg_test_far = np.mean(all_test[5:10])
-                avg_test_middle = np.mean(all_test[10:])
-                avg_test_all = np.mean(all_test)
+                    avg_test_close = np.mean(all_test[:5])
+                    avg_test_far = np.mean(all_test[5:10])
+                    avg_test_middle = np.mean(all_test[10:])
+                    avg_test_all = np.mean(all_test)
 
-                summary.value.add(tag='avg_test_close', simple_value=avg_test_close)
-                summary.value.add(tag='avg_test_far', simple_value=avg_test_far)
-                summary.value.add(tag='avg_test_middle', simple_value=avg_test_middle)
-                summary.value.add(tag='avg_test_all', simple_value=avg_test_all)
+                    summary.value.add(tag='avg_test_close', simple_value=avg_test_close)
+                    summary.value.add(tag='avg_test_far', simple_value=avg_test_far)
+                    summary.value.add(tag='avg_test_middle', simple_value=avg_test_middle)
+                    summary.value.add(tag='avg_test_all', simple_value=avg_test_all)
 
-            #train_writer.add_run_metadata(run_metadata, 'epoch%d' % epoch)
-            train_writer.add_summary(summary, epoch)
+                #train_writer.add_run_metadata(run_metadata, 'epoch%d' % epoch)
+                train_writer.add_summary(summary, epoch)
 
             if epoch % save_frequency == 0:
                 os.makedirs("%s/%04d"%(args.name,epoch))
@@ -2611,7 +2662,7 @@ def main_network(args):
                 if args.input_nc > target_channel_max:
                     # workaround due to an incorrect tensorflow dependency on placeholders...
                     #feed_dict = {camera_pos: camera_pos_vals[0, :], shader_time: time_vals[0:1]}
-                    feed_dict[camera_pos] = camera_pos_vals[0, :]
+                    feed_dict[camera_pos] = camera_pos_vals[0:1, :].transpose()
                     feed_dict[shader_time] = time_vals[0:1]
                     # workaround for tensorflow's weird compute graph that's asking for placeholder values more than needed
                     vec_val = sess.run(sparsity_vec)
@@ -2631,7 +2682,7 @@ def main_network(args):
                 if args.render_only:
                     for i in range(time_vals.shape[0]):
                         #feed_dict = {camera_pos: camera_pos_vals[i, :], shader_time: time_vals[i:i+1]}
-                        feed_dict[camera_pos] = camera_pos_vals[0, :]
+                        feed_dict[camera_pos] = camera_pos_vals[0:1, :].transpose()
                         feed_dict[shader_time] = time_vals[0:1]
                         if args.motion_blur:
                             feed_dict[camera_pos_velocity] = camera_pos_velocity_vals[i, :]
@@ -2663,7 +2714,7 @@ def main_network(args):
                     return
                 elif args.visualize_scaling:
                     #feed_dict = {camera_pos: camera_pos_vals[args.visualize_ind, :], shader_time: time_vals[args.visualize_ind:args.visualize_ind+1]}
-                    feed_dict[camera_pos] = camera_pos_vals[args.visualize_ind, :]
+                    feed_dict[camera_pos] = np.expand_dims(camera_pos_vals[args.visualize_ind, :], axis=1)
                     feed_dict[shader_time] = time_vals[args.visualize_ind:args.visualize_ind+1]
                     if args.motion_blur:
                         feed_dict[camera_pos_velocity] = camera_pos_velocity_vals[args.visualize_ind, :]
@@ -2679,7 +2730,7 @@ def main_network(args):
                     for i in range(len(val_img_names)):
                         output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
                         #print("output_ground get")
-                        camera_val = camera_pos_vals[i, :]
+                        camera_val = np.expand_dims(camera_pos_vals[i, :], axis=1)
                         #feed_dict = {camera_pos: camera_val, shader_time: time_vals[i:i+1]}
                         feed_dict[camera_pos] = camera_val
                         feed_dict[shader_time] = time_vals[i:i+1]
@@ -2701,8 +2752,8 @@ def main_network(args):
                         #pctx.trace_next_step()
                         #pctx.dump_next_step()
                         if args.tile_only:
-                            feed_dict[h_start] = tile_start_vals[i, 0] - padding_offset / 2
-                            feed_dict[w_start] = tile_start_vals[i, 1] - padding_offset / 2
+                            feed_dict[h_start] = tile_start_vals[i:i+1, 0] - padding_offset / 2
+                            feed_dict[w_start] = tile_start_vals[i:i+1, 1] - padding_offset / 2
                         feed_dict[output] = output_ground
                         output_buffer = numpy.zeros(output_ground.shape)
 
@@ -2725,8 +2776,8 @@ def main_network(args):
                             for tile_h in range(int(ntiles_h)):
                                 for tile_w in range(int(ntiles_w)):
                                     tiled_feed_dict = {}
-                                    tiled_feed_dict[h_start] = tile_h * height / ntiles_h - padding_offset / 2
-                                    tiled_feed_dict[w_start] = tile_w * width / ntiles_w - padding_offset / 2
+                                    tiled_feed_dict[h_start] = np.array([tile_h * height / ntiles_h - padding_offset / 2])
+                                    tiled_feed_dict[w_start] = np.array([tile_w * width / ntiles_w - padding_offset / 2])
                                     for key, value in feed_dict.items():
                                         if isinstance(value, numpy.ndarray) and len(value.shape) >= 3 and value.shape[1] == height and value.shape[2] == width:
                                             if len(value.shape) == 3:
@@ -2783,8 +2834,8 @@ def main_network(args):
                             #feed_dict[feed_samples[1]] = numpy.pad(numpy.random.normal(size=(1, height, width)), ((0, 0), (padding_offset // 2, padding_offset // 2), (padding_offset // 2, padding_offset // 2)), 'constant', constant_values=0.0)
                             for tile_h in range(2):
                                 for tile_w in range(2):
-                                    feed_dict[h_start] = tile_h * height / 2 - padding_offset / 2
-                                    feed_dict[w_start] = tile_w * width / 2 - padding_offset / 2
+                                    feed_dict[h_start] = np.array([tile_h * height / 2 - padding_offset / 2])
+                                    feed_dict[w_start] = np.array([tile_w * width / 2 - padding_offset / 2])
                                     output_tile = sess.run(network, feed_dict=feed_dict)
                                     output_image[0, int(tile_h*height/2):int((tile_h+1)*height/2), int(tile_w*width/2):int((tile_w+1)*width/2), :] = output_tile[0, :, :, :]
                             cv2.imwrite('test4.png', numpy.uint8(numpy.clip(output_image[0, :, :, :], 0.0, 1.0) * 255.0))
@@ -2924,23 +2975,24 @@ def main_network(args):
                         all_test[ind] = l2_loss_val * 255.0 * 255.0
                         all_grad[ind] = gradient_loss_val * 255.0 * 255.0
 
-                    summary = tf.Summary()
-                    summary.value.add(tag='avg_loss', simple_value=avg_loss)
-                    summary.value.add(tag='gradient_loss', simple_value=np.mean(all_grad))
-                    summary.value.add(tag='l2_loss', simple_value=np.mean(all_test))
+                    if args.write_summary:
+                        summary = tf.Summary()
+                        summary.value.add(tag='avg_loss', simple_value=avg_loss)
+                        summary.value.add(tag='gradient_loss', simple_value=np.mean(all_grad))
+                        summary.value.add(tag='l2_loss', simple_value=np.mean(all_test))
 
-                    if not args.test_training:
-                        avg_test_close = np.mean(all_test[:5])
-                        avg_test_far = np.mean(all_test[5:10])
-                        avg_test_middle = np.mean(all_test[10:])
-                        avg_test_all = np.mean(all_test)
+                        if not args.test_training:
+                            avg_test_close = np.mean(all_test[:5])
+                            avg_test_far = np.mean(all_test[5:10])
+                            avg_test_middle = np.mean(all_test[10:])
+                            avg_test_all = np.mean(all_test)
 
-                        summary.value.add(tag='avg_test_close', simple_value=avg_test_close)
-                        summary.value.add(tag='avg_test_far', simple_value=avg_test_far)
-                        summary.value.add(tag='avg_test_middle', simple_value=avg_test_middle)
-                        summary.value.add(tag='avg_test_all', simple_value=avg_test_all)
+                            summary.value.add(tag='avg_test_close', simple_value=avg_test_close)
+                            summary.value.add(tag='avg_test_far', simple_value=avg_test_far)
+                            summary.value.add(tag='avg_test_middle', simple_value=avg_test_middle)
+                            summary.value.add(tag='avg_test_all', simple_value=avg_test_all)
 
-                    train_writer.add_summary(summary, epoch)
+                        train_writer.add_summary(summary, epoch)
 
         else:
             test_dirbase = 'train' if args.test_training else 'test'
