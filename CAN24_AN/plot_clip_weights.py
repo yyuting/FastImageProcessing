@@ -51,13 +51,18 @@ def compute_metric(dir1, dir2, mode, mask=None, thre=0):
             print('Model [%s] initialized'%model.name())
             os.chdir(cwd)
 
-    if mode == 'perceptual_tf':
+    if mode.startswith('perceptual_tf'):
         sys.path += ['../../lpips-tensorflow']
         import lpips_tf
         import tensorflow as tf
         image0_ph = tf.placeholder(tf.float32, [1, None, None, 3])
         image1_ph = tf.placeholder(tf.float32, [1, None, None, 3])
-        distance_t = lpips_tf.lpips(image0_ph, image1_ph, model='net-lin', net='alex')
+        if mode == 'perceptual_tf':
+            distance_t = lpips_tf.lpips(image0_ph, image1_ph, model='net-lin', net='alex')
+        elif mode == 'perceptual_tf_vgg':
+            distance_t = lpips_tf.lpips(image0_ph, image1_ph, model='net-lin', net='vgg')
+        else:
+            raise
         sess = tf.Session()
 
     if mode == 'l2_with_gradient':
@@ -138,7 +143,7 @@ def compute_metric(dir1, dir2, mode, mask=None, thre=0):
             img2 = util.im2tensor(util.load_image(os.path.join(dir2, img_files2[ind])))
             #vals[ind] = numpy.mean(model.forward(img1, img2)[0])
             metric_val = numpy.expand_dims(model.forward(img1, img2), axis=2)
-        elif mode == 'perceptual_tf':
+        elif mode.startswith('perceptual_tf'):
             img1 = np.expand_dims(skimage.img_as_float(skimage.io.imread(os.path.join(dir1, img_files1[ind]))), axis=0)
             img2 = np.expand_dims(skimage.img_as_float(skimage.io.imread(os.path.join(dir2, img_files2[ind]))), axis=0)
             metric_val = sess.run(distance_t, feed_dict={image0_ph: img1, image1_ph: img2})
@@ -300,7 +305,7 @@ def get_score(name):
             mode = sys.argv[3]
         else:
             mode = None
-        if mode in ['l2', 'ssim', 'perceptual', 'l2_with_gradient', 'perceptual_tf']:
+        if mode in ['l2', 'ssim', 'perceptual', 'l2_with_gradient', 'perceptual_tf', 'perceptual_tf_vgg']:
             print('running mode', mode)
             compute_metric(name, sys.argv[2], mode)
         else:

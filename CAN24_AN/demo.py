@@ -512,11 +512,12 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
         sample3 = tf.random_normal(tf.shape(xv), dtype=dtype)
     else:
         sample3 = 0.0
+        # the assumption here is batch_size = 1
         if isinstance(samples[0], numpy.ndarray) and isinstance(samples[1], numpy.ndarray):
             sample1 = tf.constant(samples[0], dtype=dtype)
             sample2 = tf.constant(samples[1], dtype=dtype)
             if samples[0].shape[1] == height + padding_offset and samples[0].shape[2] == width + padding_offset:
-                start_slice = [0, tf.cast(h_start, tf.int32) + padding_offset // 2, tf.cast(w_start, tf.int32) + padding_offset // 2]
+                start_slice = [0, tf.cast(h_start[0], tf.int32) + padding_offset // 2, tf.cast(w_start[0], tf.int32) + padding_offset // 2]
                 size_slice = [nsamples, int(h_offset), int(w_offset)]
                 sample1 = tf.slice(sample1, start_slice, size_slice)
                 sample2 = tf.slice(sample2, start_slice, size_slice)
@@ -526,7 +527,7 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
             assert isinstance(samples[0], tf.Tensor) and isinstance(samples[1], tf.Tensor)
             sample1 = samples[0]
             sample2 = samples[1]
-            start_slice = [0, tf.cast(h_start, tf.int32) + padding_offset // 2, tf.cast(w_start, tf.int32) + padding_offset // 2]
+            start_slice = [0, tf.cast(h_start[0], tf.int32) + padding_offset // 2, tf.cast(w_start[0], tf.int32) + padding_offset // 2]
             size_slice = [nsamples, int(h_offset), int(w_offset)]
             sample1 = tf.slice(sample1, start_slice, size_slice)
             sample2 = tf.slice(sample2, start_slice, size_slice)
@@ -1335,6 +1336,7 @@ def main():
     parser.add_argument('--lpips_loss', dest='lpips_loss', action='store_true', help='if specified, use perceptual loss from Richard Zhang paepr')
     parser.add_argument('--lpips_loss_scale', dest='lpips_loss_scale', type=float, default=1.0, help='specifies the scale of lpips loss')
     parser.add_argument('--no_l2_loss', dest='l2_loss', action='store_false', help='if specified, do not use l2 loss')
+    parser.add_argument('--lpips_net', dest='lpips_net', default='alex', help='specifies which network to use for lpips loss')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -1429,7 +1431,7 @@ def main():
     parser.set_defaults(train_with_zero_samples=False)
     parser.set_defaults(tile_only=False)
     parser.set_defaults(write_summary=True)
-    parser.set_defautls(lpips_loss=False)
+    parser.set_defaults(lpips_loss=False)
     parser.set_defaults(l2_loss=True)
 
     args = parser.parse_args()
@@ -1960,7 +1962,7 @@ def main_network(args):
             else:
                 loss = tf.reduce_mean(loss_map * weight_map)
     else:
-        loss = 0
+        loss = tf.constant(0.0, dtype=dtype)
 
     loss_l2 = loss
     loss_add_term = loss
@@ -2011,7 +2013,7 @@ def main_network(args):
     elif args.lpips_loss:
         sys.path += ['../../lpips-tensorflow']
         import lpips_tf
-        loss_lpips = lpips_tf.lpips(network, output, model='net-lin', net='alex')
+        loss_lpips = lpips_tf.lpips(network, output, model='net-lin', net=args.lpips_net)
         perceptual_loss_add = args.lpips_loss_scale * loss_lpips
         loss += perceptual_loss_add
     else:
