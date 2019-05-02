@@ -47,7 +47,7 @@ padding_offset = 32
 
 deprecated_options = ['feature_reduction_channel_by_samples']
 
-def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True, sigmoid_scaling=False, manual_features_only=False, aux_plus_manual_features=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, first_n=-1, first_n_no_last=-1, mean_var_only=False, zero_samples=False, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None, every_nth=-1, every_nth_stratified=False, one_hop_parent=False, target_idx=[], use_manual_index=False, manual_index_file='', additional_features=True, ignore_last_n_scale=0, include_noise_feature=False, crop_h=-1, crop_w=-1, no_noise_feature=False, relax_clipping=False):
+def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', learn_scale=False, soft_scale=False, scale_ratio=False, use_sigmoid=False, feature_w=[], color_inds=[], intersection=True, sigmoid_scaling=False, manual_features_only=False, aux_plus_manual_features=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, first_n=-1, first_n_no_last=-1, mean_var_only=False, zero_samples=False, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None, every_nth=-1, every_nth_stratified=False, one_hop_parent=False, target_idx=[], use_manual_index=False, manual_index_file='', additional_features=True, ignore_last_n_scale=0, include_noise_feature=False, crop_h=-1, crop_w=-1, no_noise_feature=False, relax_clipping=False, render_sigma=None):
     # 2x_1sample on margo
     #camera_pos = np.load('/localtmp/yuting/out_2x1_manual_carft/train.npy')[0, :]
 
@@ -181,7 +181,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
 
     #samples = [all_features[-2, :, :], all_features[-1, :, :]]
 
-    features, vec_output, manual_features = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, geometry=geometry, return_vec_output=True, compiler_module=compiler_module, manual_features_only=manual_features_only, aux_plus_manual_features=aux_plus_manual_features, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=samples, fov=fov, camera_pos_velocity=camera_pos_velocity, t_sigma=t_sigma, zero_samples=zero_samples, render_fix_spatial_sample=render_fix_spatial_sample, render_fix_temporal_sample=render_fix_temporal_sample, render_zero_spatial_sample=render_zero_spatial_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples, additional_features=additional_features, include_noise_feature=include_noise_feature, no_noise_feature=no_noise_feature)
+    features, vec_output, manual_features = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, geometry=geometry, return_vec_output=True, compiler_module=compiler_module, manual_features_only=manual_features_only, aux_plus_manual_features=aux_plus_manual_features, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=samples, fov=fov, camera_pos_velocity=camera_pos_velocity, t_sigma=t_sigma, zero_samples=zero_samples, render_fix_spatial_sample=render_fix_spatial_sample, render_fix_temporal_sample=render_fix_temporal_sample, render_zero_spatial_sample=render_zero_spatial_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples, additional_features=additional_features, include_noise_feature=include_noise_feature, no_noise_feature=no_noise_feature, render_sigma=render_sigma)
 
     if len(vec_output) > 3:
         loop_statistic = vec_output[3:]
@@ -537,6 +537,7 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
 
     if render_sigma is None:
         render_sigma = [0.5, 0.5, t_sigma]
+
     if not zero_samples:
         #print("using random samples")
 
@@ -1337,6 +1338,7 @@ def main():
     parser.add_argument('--lpips_loss_scale', dest='lpips_loss_scale', type=float, default=1.0, help='specifies the scale of lpips loss')
     parser.add_argument('--no_l2_loss', dest='l2_loss', action='store_false', help='if specified, do not use l2 loss')
     parser.add_argument('--lpips_net', dest='lpips_net', default='alex', help='specifies which network to use for lpips loss')
+    parser.add_argument('--render_sigma', dest='render_sigma', type=float, default=0.5, help='specifies the sigma used for rendering')
 
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -1727,8 +1729,8 @@ def main_network(args):
                 #feed_samples = [numpy.random.normal(size=(1, height+padding_offset, width+padding_offset)), numpy.random.normal(size=(1, height+padding_offset, width+padding_offset))]
                 feed_samples = [tf.placeholder(dtype=dtype, shape=[1, height+padding_offset, width+padding_offset]), tf.placeholder(dtype=dtype, shape=[1, height+padding_offset, width+padding_offset])]
             else:
-                h_start = 0
-                w_start = 0
+                h_start = tf.constant([0.0])
+                w_start = tf.constant([0.0])
                 h_offset = height
                 w_offset = width
                 feed_samples = None
@@ -1760,7 +1762,9 @@ def main_network(args):
             if args.train_with_zero_samples:
                 zero_samples = True
 
-            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection, sigmoid_scaling=args.sigmoid_scaling, manual_features_only=args.manual_features_only, aux_plus_manual_features=args.aux_plus_manual_features, efficient_trace=args.efficient_trace, collect_loop_statistic=args.collect_loop_statistic, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=feed_samples, fov=args.fov, camera_pos_velocity=camera_pos_velocity, first_last_only=args.first_last_only, last_only=args.last_only, subsample_loops=args.subsample_loops, last_n=args.last_n, first_n=args.first_n, first_n_no_last=args.first_n_no_last, mean_var_only=args.mean_var_only, zero_samples=zero_samples, render_fix_spatial_sample=args.render_fix_spatial_sample, render_fix_temporal_sample=args.render_fix_temporal_sample, render_zero_spatial_sample=args.render_zero_spatial_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples, every_nth=args.every_nth, every_nth_stratified=args.every_nth_stratified, one_hop_parent=args.one_hop_parent, target_idx=target_idx, use_manual_index=args.use_manual_index, manual_index_file=args.manual_index_file, additional_features=args.additional_features, ignore_last_n_scale=args.ignore_last_n_scale, include_noise_feature=args.include_noise_feature, crop_h=args.crop_h, crop_w=args.crop_w, no_noise_feature=args.no_noise_feature, relax_clipping=args.relax_clipping)
+            render_sigma = [args.render_sigma, args.render_sigma, 0]
+
+            input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, learn_scale=args.learn_scale, soft_scale=args.soft_scale, scale_ratio=args.scale_ratio, use_sigmoid=args.use_sigmoid, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection, sigmoid_scaling=args.sigmoid_scaling, manual_features_only=args.manual_features_only, aux_plus_manual_features=args.aux_plus_manual_features, efficient_trace=args.efficient_trace, collect_loop_statistic=args.collect_loop_statistic, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=feed_samples, fov=args.fov, camera_pos_velocity=camera_pos_velocity, first_last_only=args.first_last_only, last_only=args.last_only, subsample_loops=args.subsample_loops, last_n=args.last_n, first_n=args.first_n, first_n_no_last=args.first_n_no_last, mean_var_only=args.mean_var_only, zero_samples=zero_samples, render_fix_spatial_sample=args.render_fix_spatial_sample, render_fix_temporal_sample=args.render_fix_temporal_sample, render_zero_spatial_sample=args.render_zero_spatial_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples, every_nth=args.every_nth, every_nth_stratified=args.every_nth_stratified, one_hop_parent=args.one_hop_parent, target_idx=target_idx, use_manual_index=args.use_manual_index, manual_index_file=args.manual_index_file, additional_features=args.additional_features, ignore_last_n_scale=args.ignore_last_n_scale, include_noise_feature=args.include_noise_feature, crop_h=args.crop_h, crop_w=args.crop_w, no_noise_feature=args.no_noise_feature, relax_clipping=args.relax_clipping, render_sigma=render_sigma)
 
             if args.random_target_channel:
                 numpy.save(target_idx_file, target_idx)
@@ -2015,6 +2019,8 @@ def main_network(args):
         import lpips_tf
         loss_lpips = lpips_tf.lpips(network, output, model='net-lin', net=args.lpips_net)
         perceptual_loss_add = args.lpips_loss_scale * loss_lpips
+        if args.batch_size > 1:
+            perceptual_loss_add = tf.reduce_mean(perceptual_loss_add)
         loss += perceptual_loss_add
     else:
         perceptual_loss_add = tf.constant(0)
@@ -2458,6 +2464,8 @@ def main_network(args):
                         if args.motion_blur:
                             feed_dict[camera_pos_velocity] = camera_pos_velocity_vals[frame_idx, :]
                         _,current, current_l2, current_sparsity, current_regularization, current_training, current_perceptual =sess.run([opt,loss, loss_l2, sparsity_loss, regularizer_loss, loss_to_opt, perceptual_loss_add],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
+                        #_ = sess.run(opt, feed_dict=feed_dict)
+                        #current, current_l2, current_sparsity, current_regularization, current_training, current_perceptual = sess.run([loss, loss_l2, sparsity_loss, regularizer_loss, loss_to_opt, perceptual_loss_add], feed_dict=feed_dict)
                         #current =sess.run(loss,feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
                         if numpy.isnan(current):
                             print(frame_idx, tile_idx)
@@ -2466,6 +2474,7 @@ def main_network(args):
                             #print(numpy.sum(numpy.isnan(arr0)), arr0.shape)
                             #arr1 = sess.run(debug_input, feed_dict=feed_dict)
                             #print(numpy.sum(numpy.isnan(arr1)), arr1.shape)
+
 
                     if args.learn_scale:
                         feature_val = sess.run(feature_w)
