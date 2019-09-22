@@ -3,21 +3,21 @@ import os
 import sys
 sys.path += ['../../differentiable_proxy']
 from local_laplacian_tf import local_laplacian_tf
-os.environ['CUDA_VISIBLE_DEVICES']='1'
 import skimage.io
 import skimage
 import numpy
 
-dir = 'trippy_vgg_res'
+#dir = 'trippy_vgg_res'
 min_res = 32
 
 def main():
+    dir = sys.argv[1]
     input = tf.placeholder(tf.float32, [None, None, 3])
     output = local_laplacian_tf(tf.expand_dims(input, axis=0), J=6)
     sess = tf.Session()
     files = os.listdir(dir)
     for file in files:
-        if file.startswith('t') and file.endswith('.png'):
+        if file.endswith('.png') and ('local_laplacian' not in file):
             in_img = skimage.img_as_float(skimage.io.imread(os.path.join(dir, file)))
             if in_img.shape[0] % min_res != 0:
                 raise

@@ -1420,6 +1420,11 @@ def main():
     parser.add_argument('--ndf', dest='ndf', type=int, default=32, help='number of discriminator filters on first layer if using patch GAN loss')
     parser.add_argument('--gan_loss_scale', dest='gan_loss_scale', type=float, default=1.0, help='the scale multiplied to GAN loss before adding to regular loss')
     parser.add_argument('--discrim_nlayers', dest='discrim_nlayers', type=int, default=2, help='number of layers of discriminator')
+    parser.add_argument('--discrim_use_trace', dest='discrim_use_trace', action='store_true', help='if specified, use trace info for discriminator')
+    parser.add_argument('--discrim_trace_shared_weights', dest='discrim_trace_shared_weights', action='store_true', help='if specified, when discriminator is using trace, it directly uses the 48 dimension used by the generator, and the feature reduction layer weights will be shared with the generator')
+    parser.add_argument('--discrim_paired_input', dest='discrim_paired_input', action='store_true', help='if specified, use paired input (gt, generated) or (generated, gt) to discriminator and predict which order is correct')
+    parser.add_argument('--save_frequency', dest='save_frequency', type=int, default=100, help='specifies the frequency to save a checkpoint')
+    parser.add_argument('--discrim_train_steps', dest='discrim_train_steps', type=int, default=1, help='specified how often to update discrim')
     
     parser.set_defaults(is_npy=False)
     parser.set_defaults(is_train=False)
@@ -1524,6 +1529,9 @@ def main():
     parser.set_defaults(additional_input=False)
     parser.set_defaults(use_lstm=False)
     parser.set_defaults(patch_gan_loss=False)
+    parser.set_defaults(discrim_use_trace=False)
+    parser.set_defaults(discrim_trace_shared_weights=False)
+    parser.set_defaults(discrim_paired_input=False)
 
     args = parser.parse_args()
 
@@ -1645,6 +1653,9 @@ def main_network(args):
         args.initial_layer_channels = actual_conv_channel
     if args.final_layer_channels < 0:
         args.final_layer_channels = actual_conv_channel
+        
+    #if args.which_epoch <= 0:
+    #    args.which_epoch = args.epoch
 
     global dilation_threshold
     dilation_threshold = args.dilation_threshold
@@ -1924,6 +1935,45 @@ def main_network(args):
             args.input_nc = int(input_to_network.shape[-1])
             color_inds = color_inds[::-1]
             debug_input = input_to_network
+            
+    def feature_reduction_layer(input_to_network, _manual_regularize=False, _replace_normalize_weights=None):
+        with tf.variable_scope("feature_reduction"):
+            r_loss = tf.constant(0.0)
+            if (args.regularizer_scale > 0 or args.L2_regularizer_scale > 0) and not _manual_regularize:
+                regularizer = slim.l1_l2_regularizer(scale_l1=args.regularizer_scale, scale_l2=args.L2_regularizer_scale)
+            else:
+                regularizer = None
+
+            actual_nfeatures = args.input_nc
+
+            weights = tf.get_variable('w0', [1, 1, actual_nfeatures, args.initial_layer_channels], initializer=tf.contrib.layers.xavier_initializer() if not args.identity_initialize else identity_initializer(color_inds), regularizer=regularizer)
+            if args.normalize_weights:
+                if args.abs_normalize:
+                    column_sum = tf.reduce_sum(tf.abs(weights), [0, 1, 2])
+                elif args.rowwise_L2_normalize:
+                    column_sum = tf.reduce_sum(tf.abs(tf.square(weights)), [0, 1, 2])
+                elif args.Frobenius_normalize:
+                    column_sum = tf.reduce_sum(tf.abs(tf.square(weights)))
+                else:
+                    column_sum = tf.reduce_sum(weights, [0, 1, 2])
+                weights_to_input = weights / column_sum
+                if args.clip_weights_percentage_after_normalize:
+                    weights_to_input = tf.cond(_replace_normalize_weights, lambda: normalize_weights, lambda: weights_to_input)
+            else:
+                weights_to_input = weights
+
+            reduced_feat = tf.nn.conv2d(input_to_network, weights_to_input, [1, 1, 1, 1], "SAME")
+            if _manual_regularize:
+                r_loss = args.regularizer_scale * tf.reduce_mean(tf.abs(weights_to_input))
+            if args.initial_layer_channels <= actual_conv_channel:
+                ini_id = True
+            else:
+                ini_id = False
+
+            if args.feature_reduction_regularization_scale > 0:
+                r_loss = args.feature_reduction_regularization_scale * tf.reduce_mean(tf.abs(weights_to_input))
+            
+        return reduced_feat, r_loss
 
     #with tf.control_dependencies([input_to_network]):
     with tf.variable_scope("generator"):
@@ -2026,38 +2076,42 @@ def main_network(args):
                 actual_initial_layer_channels = args.initial_layer_channels
                 regularizer = None
                 if not args.use_lstm:
-                    
-                    if (args.regularizer_scale > 0 or args.L2_regularizer_scale > 0) and not manual_regularize:
-                        regularizer = slim.l1_l2_regularizer(scale_l1=args.regularizer_scale, scale_l2=args.L2_regularizer_scale)
-                    
-                    actual_nfeatures = args.input_nc
-                    with tf.variable_scope("feature_reduction"):
-                        weights = tf.get_variable('w0', [1, 1, actual_nfeatures, actual_initial_layer_channels], initializer=tf.contrib.layers.xavier_initializer() if not args.identity_initialize else identity_initializer(color_inds), regularizer=regularizer)
-                        if args.normalize_weights:
-                            if args.abs_normalize:
-                                column_sum = tf.reduce_sum(tf.abs(weights), [0, 1, 2])
-                            elif args.rowwise_L2_normalize:
-                                column_sum = tf.reduce_sum(tf.abs(tf.square(weights)), [0, 1, 2])
-                            elif args.Frobenius_normalize:
-                                column_sum = tf.reduce_sum(tf.abs(tf.square(weights)))
+                    input_to_network, regularizer_loss = feature_reduction_layer(input_to_network, _manual_regularize=manual_regularize, _replace_normalize_weights=replace_normalize_weights)
+                    if False:
+                        with tf.variable_scope("feature_reduction"):
+                            if (args.regularizer_scale > 0 or args.L2_regularizer_scale > 0) and not manual_regularize:
+                                regularizer = slim.l1_l2_regularizer(scale_l1=args.regularizer_scale, scale_l2=args.L2_regularizer_scale)
+
+                            actual_nfeatures = args.input_nc
+
+                            weights = tf.get_variable('w0', [1, 1, actual_nfeatures, actual_initial_layer_channels], initializer=tf.contrib.layers.xavier_initializer() if not args.identity_initialize else identity_initializer(color_inds), regularizer=regularizer)
+                            if args.normalize_weights:
+                                if args.abs_normalize:
+                                    column_sum = tf.reduce_sum(tf.abs(weights), [0, 1, 2])
+                                elif args.rowwise_L2_normalize:
+                                    column_sum = tf.reduce_sum(tf.abs(tf.square(weights)), [0, 1, 2])
+                                elif args.Frobenius_normalize:
+                                    column_sum = tf.reduce_sum(tf.abs(tf.square(weights)))
+                                else:
+                                    column_sum = tf.reduce_sum(weights, [0, 1, 2])
+                                weights_to_input = weights / column_sum
+                                if args.clip_weights_percentage_after_normalize:
+                                    weights_to_input = tf.cond(replace_normalize_weights, lambda: normalize_weights, lambda: weights_to_input)
                             else:
-                                column_sum = tf.reduce_sum(weights, [0, 1, 2])
-                            weights_to_input = weights / column_sum
-                            if args.clip_weights_percentage_after_normalize:
-                                weights_to_input = tf.cond(replace_normalize_weights, lambda: normalize_weights, lambda: weights_to_input)
-                        else:
-                            weights_to_input = weights
+                                weights_to_input = weights
 
-                        input_to_network = tf.nn.conv2d(input_to_network, weights_to_input, [1, 1, 1, 1], "SAME")
-                        if manual_regularize:
-                            regularizer_loss = args.regularizer_scale * tf.reduce_mean(tf.abs(weights_to_input))
-                        if actual_initial_layer_channels <= actual_conv_channel:
-                            ini_id = True
-                        else:
-                            ini_id = False
+                            input_to_network = tf.nn.conv2d(input_to_network, weights_to_input, [1, 1, 1, 1], "SAME")
+                            if manual_regularize:
+                                regularizer_loss = args.regularizer_scale * tf.reduce_mean(tf.abs(weights_to_input))
+                            if actual_initial_layer_channels <= actual_conv_channel:
+                                ini_id = True
+                            else:
+                                ini_id = False
 
-                        if args.feature_reduction_regularization_scale > 0:
-                            regularizer_loss = args.feature_reduction_regularization_scale * tf.reduce_mean(tf.abs(weights_to_input))
+                            if args.feature_reduction_regularization_scale > 0:
+                                regularizer_loss = args.feature_reduction_regularization_scale * tf.reduce_mean(tf.abs(weights_to_input))
+                            
+                        
                 else:
                     ngroups = input_to_network.shape[-1] // args.lstm_nfeatures_per_group
                     orig_shape = input_to_network.shape
@@ -2067,6 +2121,8 @@ def main_network(args):
                     #input_to_network = layer(input_to_network)
                     _, states = tf.nn.dynamic_rnn(rnn_cell, input_to_network, dtype=dtype)
                     input_to_network = tf.reshape(states.h, [orig_shape[0], orig_shape[1], orig_shape[2], args.initial_layer_channels])
+                    
+                reduced_dim_feature = input_to_network
 
                 if args.add_initial_layers:
                     for nlayer in range(3):
@@ -2203,12 +2259,23 @@ def main_network(args):
         # descriminator adapted from
         # https://github.com/affinelayer/pix2pix-tensorflow/blob/master/pix2pix.py
         # https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/models/networks.py
-        def create_discriminator(discrim_inputs, discrim_targets):
+        def create_discriminator(discrim_inputs, discrim_target, sliced_feat=None, other_target=None):
             n_layers = args.discrim_nlayers
             layers = []
 
             # 2x [batch, height, width, in_channels] => [batch, height, width, in_channels * 2]
-            input = tf.concat([discrim_inputs, discrim_targets], axis=3)
+            if (not args.discrim_use_trace) and (not args.discrim_paired_input):
+                concat_list = [discrim_inputs, discrim_target]
+            elif args.discrim_use_trace:
+                concat_list = [discrim_inputs, sliced_feat]
+                if args.discrim_paired_input:
+                    concat_list += [discrim_target, other_target]
+                else:
+                    concat_list += [discrim_target]
+            else:
+                concat_list = [discrim_target, other_target]
+            
+            input = tf.concat(concat_list, axis=3)
             d_network = input
             #n_ch = 32
             n_ch = args.ndf
@@ -2240,14 +2307,25 @@ def main_network(args):
         
         if args.is_train:
             condition_input = tf.slice(debug_input, [0, padding_offset // 2, padding_offset // 2, 0], [args.batch_size, output_pl_h, output_pl_w, 3])
+            
+            if args.discrim_use_trace:
+                if args.discrim_trace_shared_weights:
+                    sliced_feat = tf.slice(reduced_dim_feature, [0, padding_offset // 2, padding_offset // 2, 0], [args.batch_size, output_pl_h, output_pl_w, args.conv_channel_no])
+                else:
+                    # this may lead to OOM
+                    with tf.name_scope("discriminator_feature_reduction"):
+                        discrim_feat, _ = feature_reduction_layer(debug_input)
+                        sliced_feat = tf.slice(discrim_feat, [0, padding_offset // 2, padding_offset // 2, 0], [args.batch_size, output_pl_h, output_pl_w, args.conv_channel_no])
+            else:
+                sliced_feat = None
+
             with tf.name_scope("discriminator_real"):
                 with tf.variable_scope("discriminator"):
-                    # TODO: debug_input and output size may mismatch, check it in debugger
-                    predict_real = create_discriminator(condition_input, output)
+                    predict_real = create_discriminator(condition_input, output, sliced_feat, network)
 
             with tf.name_scope("discriminator_fake"):
                 with tf.variable_scope("discriminator", reuse=True):
-                    predict_fake = create_discriminator(condition_input, network)
+                    predict_fake = create_discriminator(condition_input, network, sliced_feat, output)
 
 
             with tf.name_scope("discriminator_loss"):
@@ -2258,7 +2336,12 @@ def main_network(args):
             with tf.name_scope("discriminator_train"):
                 discrim_tvars = [var for var in tf.trainable_variables() if var.name.startswith("discriminator")]
                 discrim_optim = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
-                discrim_step = discrim_optim.minimize(discrim_loss, var_list=discrim_tvars)
+
+                if args.discrim_train_steps > 1:
+                    step_count = tf.placeholder(tf.int32)
+                    discrim_step = tf.cond(tf.floormod(step_count, args.discrim_train_steps) < 1, lambda: discrim_optim.minimize(discrim_loss, var_list=discrim_tvars), lambda: tf.no_op())
+                else:
+                    discrim_step = discrim_optim.minimize(discrim_loss, var_list=discrim_tvars)
             
             discrim_saver = tf.train.Saver(discrim_tvars, max_to_keep=1000)
             
@@ -2693,6 +2776,8 @@ def main_network(args):
         num_transition_epoch = 20
         alpha_schedule = np.logspace(alpha_start, alpha_end, num_transition_epoch)
         printval = False
+        
+        total_step_count = 0
 
         min_avg_loss = 1e20
 
@@ -2712,8 +2797,9 @@ def main_network(args):
                 if epoch <= args.which_epoch:
                     continue
             else:
-                next_save_point = int(np.ceil(float(epoch) / save_frequency)) * save_frequency
-                if os.path.isdir("%s/%04d"%(args.name,next_save_point)):
+                next_save_point = epoch
+                # for patchGAN loss, the checkpoint in the root directory may not be very up to date (if discrim is too strong it is very possible that the model saves a best l2/perceptual error, which is a lot of epochs ago)
+                if os.path.isdir("%s/%04d"%(args.name,next_save_point)) and not args.patch_gan_loss:
                     continue
 
             cnt=0
@@ -2806,6 +2892,10 @@ def main_network(args):
                         else:
                             feed_dict[dx_ground] = grad_arr[:, :, :, 1:4]
                             feed_dict[dy_ground] = grad_arr[:, :, :, 4:]
+                            
+                    if args.discrim_train_steps > 1:
+                        feed_dict[step_count] = total_step_count
+                        total_step_count += 1
 
                     if (not args.use_queue) and read_data_from_file:
                         if args.preload:
@@ -3003,27 +3093,26 @@ def main_network(args):
                 #train_writer.add_run_metadata(run_metadata, 'epoch%d' % epoch)
                 train_writer.add_summary(summary, epoch)
 
-            if epoch % save_frequency == 0:
-                os.makedirs("%s/%04d"%(args.name,epoch))
-                target=open("%s/%04d/score.txt"%(args.name,epoch),'w')
-                target.write("%f"%np.mean(all[np.where(all)]))
-                target.close()
+            os.makedirs("%s/%04d"%(args.name,epoch))
+            target=open("%s/%04d/score.txt"%(args.name,epoch),'w')
+            target.write("%f"%np.mean(all[np.where(all)]))
+            target.close()
 
-                #target = open("%s/%04d/score_breakdown.txt"%(args.name,epoch),'w')
-                #target.write("%f, %f, %f, %f"%(avg_test_close, avg_test_far, avg_test_middle, avg_test_all))
-                #target.close()
+            #target = open("%s/%04d/score_breakdown.txt"%(args.name,epoch),'w')
+            #target.write("%f, %f, %f, %f"%(avg_test_close, avg_test_far, avg_test_middle, avg_test_all))
+            #target.close()
 
-                if min_avg_loss == avg_training_loss:
-                    for s_i in range(len(savers)):
-                        ckpt_dir = os.path.join(args.name, save_names[s_i])
-                        if not os.path.isdir(ckpt_dir):
-                            os.makedirs(ckpt_dir)
-                        savers[s_i].save(sess,"%s/model.ckpt" % ckpt_dir)
-                if args.save_intermediate_epoch:
-                    for s_i in range(len(savers)):
-                        ckpt_dir = os.path.join(args.name, epoch, save_names[s_i])
+            if min_avg_loss == avg_training_loss:
+                for s_i in range(len(savers)):
+                    ckpt_dir = os.path.join(args.name, save_names[s_i])
+                    if not os.path.isdir(ckpt_dir):
                         os.makedirs(ckpt_dir)
-                        savers[s_i].save(sess,"%s/model.ckpt" % ckpt_dir)
+                    savers[s_i].save(sess,"%s/model.ckpt" % ckpt_dir)
+            if epoch % args.save_frequency == 0:
+                for s_i in range(len(savers)):
+                    ckpt_dir = os.path.join("%s/%04d"%(args.name,epoch), save_names[s_i])
+                    os.makedirs(ckpt_dir)
+                    savers[s_i].save(sess,"%s/model.ckpt" % ckpt_dir)
 
         #var_list_gconv1 = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='g_conv1')
         #g_conv1_dict = {}
