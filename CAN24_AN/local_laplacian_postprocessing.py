@@ -8,12 +8,12 @@ import skimage
 import numpy
 
 #dir = 'trippy_vgg_res'
-min_res = 32
+min_res = 64
 
 def main():
     dir = sys.argv[1]
     input = tf.placeholder(tf.float32, [None, None, 3])
-    output = local_laplacian_tf(tf.expand_dims(input, axis=0), J=6)
+    output = local_laplacian_tf(tf.expand_dims(input, axis=0), J=7)
     sess = tf.Session()
     files = os.listdir(dir)
     for file in files:

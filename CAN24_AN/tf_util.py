@@ -150,3 +150,26 @@ def tf_np_wrapper(func):
             return actual_func(x, y)
 
     return f
+
+def texture_linear_uv(texture, x, y):
+    xx_scaled = x * tf.cast(tf.shape(texture)[1], tf.float32)
+    yy_scaled = y * tf.cast(tf.shape(texture)[0], tf.float32)
+    
+    xx_down = tf.floor(xx_scaled)
+    xx_up = xx_down + 1
+    yy_down = tf.floor(yy_scaled)
+    yy_up = yy_down + 1
+
+    rx = xx_up - xx_scaled
+    ry = yy_up - yy_scaled
+
+    xx_up_mod = xx_up
+    yy_up_mod = yy_up
+    
+    val_dd = tf.gather_nd(texture, tf.stack((tf.cast(yy_down, tf.int32), tf.cast(xx_down, tf.int32)), axis=3))
+    val_du = tf.gather_nd(texture, tf.stack((tf.cast(yy_up_mod, tf.int32), tf.cast(xx_down, tf.int32)), axis=3))
+    val_ud = tf.gather_nd(texture, tf.stack((tf.cast(yy_down, tf.int32), tf.cast(xx_up_mod, tf.int32)), axis=3))
+    val_uu = tf.gather_nd(texture, tf.stack((tf.cast(yy_up_mod, tf.int32), tf.cast(xx_up_mod, tf.int32)), axis=3))
+
+    ans = rx * ry * val_dd + rx * (1.0 - ry) * val_du + (1.0 - rx) * ry * val_ud + (1.0 - rx) * (1.0 - ry) * val_uu
+    return ans
