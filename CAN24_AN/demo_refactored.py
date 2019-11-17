@@ -50,7 +50,7 @@ padding_offset = 32
 
 deprecated_options = ['feature_reduction_channel_by_samples', 'is_npy', 'orig_channel', 'nsamples', 'is_bin', 'upsample_scale', 'upsample_single', 'upsample_shrink_feature', 'clip_weights', 'deconv', 'share_weights', 'clip_weights_percentage', 'encourage_sparse_features', 'collect_validate_loss', 'validate_loss_freq', 'collect_validate_while_training', 'clip_weights_percentage_after_normalize', 'normalize_weights', 'normalize_weights', 'rowwise_L2_normalize', 'Frobenius_normalize', 'bilinear_upsampling', 'full_resolution', 'unet', 'unet_base_channel', 'learn_scale', 'soft_scale', 'scale_ratio', 'use_sigmoid', 'orig_rgb', 'use_weight_map', 'render_camera_pos_velocity', 'gradient_loss', 'normalize_grad', 'grayscale_grad', 'cos_sim', 'gradient_loss_scale', 'gradient_loss_all_pix', 'gradient_loss_canny_weight', 'two_stage_training', 'new_minimizer', 'weight_map_add', 'sigmoid_scaling', 'visualize_scaling', 'visualize_ind', 'test_tiling', 'motion_blur', 'dynamic_training_samples', 'dynamic_training_mode', 'automatic_find_gpu', 'test_rotation', 'abs_normalize', 'feature_reduction_regularization_scale', 'learn_sigma']
 
-def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', feature_w=[], color_inds=[], intersection=True, manual_features_only=False, aux_plus_manual_features=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, first_n=-1, first_n_no_last=-1, mean_var_only=False, zero_samples=False, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None, every_nth=-1, every_nth_stratified=False, one_hop_parent=False, target_idx=[], use_manual_index=False, manual_index_file='', additional_features=True, ignore_last_n_scale=0, include_noise_feature=False, crop_h=-1, crop_w=-1, no_noise_feature=False, relax_clipping=False, render_sigma=None, same_sample_all_pix=False, stratified_sample_higher_res=False, samples_int=[None], texture_maps=[], partial_trace=1.0, use_lstm=False, lstm_nfeatures_per_group=1, rotate=0, flip=0, use_dataroot=True, automatic_subsample=False, automate_raymarching_def=False, chron_order=False, def_loop_log_last=False, temporal_texture_buffer=False, texture_inds=[]):
+def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', feature_w=[], color_inds=[], intersection=True, manual_features_only=False, aux_plus_manual_features=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, first_n=-1, first_n_no_last=-1, mean_var_only=False, zero_samples=False, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None, every_nth=-1, every_nth_stratified=False, one_hop_parent=False, target_idx=[], use_manual_index=False, manual_index_file='', additional_features=True, ignore_last_n_scale=0, include_noise_feature=False, crop_h=-1, crop_w=-1, no_noise_feature=False, relax_clipping=False, render_sigma=None, same_sample_all_pix=False, stratified_sample_higher_res=False, samples_int=[None], texture_maps=[], partial_trace=1.0, use_lstm=False, lstm_nfeatures_per_group=1, rotate=0, flip=0, use_dataroot=True, automatic_subsample=False, automate_raymarching_def=False, chron_order=False, def_loop_log_last=False, temporal_texture_buffer=False, texture_inds=[], log_only_return_def_raymarching=True, debug=[]):
     # 2x_1sample on margo
     #camera_pos = np.load('/localtmp/yuting/out_2x1_manual_carft/train.npy')[0, :]
 
@@ -118,8 +118,14 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             shader_args = ' render_texture_map ' + geometry + ' none'
         elif shader_name == 'oceanic_simple_generate_def':
             shader_args = ' render_oceanic_simple_generate_def ' + geometry + ' none'
-        elif shader_name in ['fluid_approxiamte', 'fluid_approximate_3pass_10f']:
+        elif shader_name == 'oceanic_simple_all_raymarching':
+            shader_args = ' render_oceanic_simple_all_raymarching ' + geometry + ' none'
+        elif shader_name in ['fluid_approximate', 'fluid_approximate_3pass_10f']:
             shader_args = ' render_fluid_approximate_3pass_10f ' + geometry + ' none'
+        elif shader_name == 'fluid_approximate_3pass_no_mouse_perlin':
+            shader_args = ' render_fluid_approximate_3pass_no_mouse_perlin ' + geometry + ' none'
+        elif shader_name == 'fluid_approximate_sin':
+            shader_args = ' render_fluid_approximate_sin ' + geometry + ' none'
 
         render_util_dir = os.path.abspath('../../global_opt/proj/apps')
         render_single_full_name = os.path.abspath(os.path.join(render_util_dir, 'render_single.py'))
@@ -181,6 +187,8 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             render_single_cmd = render_single_cmd + ' --automate_raymarching_def'
         if def_loop_log_last:
             render_single_cmd = render_single_cmd + ' --def_loop_log_last'
+        if log_only_return_def_raymarching:
+            render_single_cmd = render_single_cmd + ' --log_only_return_def_raymarching'
         entire_cmd = 'cd ' + render_util_dir + ' && ' + render_single_cmd + ' && cd ' + cwd
         ans = os.system(entire_cmd)
         #ans = subprocess.call('cd ' + render_util_dir + ' && source activate py36 && python ' + render_single_full_name + ' out ' + shader_args + ' --is-tf --code-only --log-intermediates && source activate tensorflow35 && cd ' + cwd)
@@ -227,19 +235,20 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
         
     
         
-    if temporal_texture_buffer and isinstance(texture_maps, list): 
-        # hack: both features and manual_features contain texture input
-        reshaped_texture_maps = []
-        for i in range(len(texture_maps)):
-            if w_offset == width and h_offset == height:
-                reshaped_texture_maps.append(tf.expand_dims(texture_maps[i], 0))
-            else:
-                reshaped_texture_maps.append(tf.expand_dims(tf.pad(texture_maps[i], [[padding_offset // 2, padding_offset // 2], [padding_offset // 2, padding_offset // 2]], "CONSTANT"), 0))
-            features.append(reshaped_texture_maps[-1])
-            manual_features.append(reshaped_texture_maps[-1])
-    else:
-        # if texture_maps is a tensor generated from dataset pipeline, then assume it's not in tile mode
-        assert w_offset == width and h_offset == height
+    if temporal_texture_buffer:
+        if isinstance(texture_maps, list): 
+            # hack: both features and manual_features contain texture input
+            reshaped_texture_maps = []
+            for i in range(len(texture_maps)):
+                if w_offset == width and h_offset == height:
+                    reshaped_texture_maps.append(tf.expand_dims(texture_maps[i], 0))
+                else:
+                    reshaped_texture_maps.append(tf.expand_dims(tf.pad(texture_maps[i], [[padding_offset // 2, padding_offset // 2], [padding_offset // 2, padding_offset // 2]], "CONSTANT"), 0))
+                features.append(reshaped_texture_maps[-1])
+                manual_features.append(reshaped_texture_maps[-1])
+        else:
+            # if texture_maps is a tensor generated from dataset pipeline, then assume it's not in tile mode
+            assert w_offset == width and h_offset == height
 
     color_features = vec_output
     valid_features = []
@@ -294,6 +303,10 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                         except:
                             raise
                 out_features = manual_features_valid
+                # hack for fluid approx mode: because we also add texture to aux features, should include their inds
+                if temporal_texture_buffer and (not isinstance(texture_maps, list)):
+                    for i in range(7):
+                        manual_inds.append(len(valid_features)+i)
                 if use_dataroot:
                     feature_bias = feature_bias[manual_inds]
                     feature_scale = feature_scale[manual_inds]
@@ -1310,6 +1323,7 @@ def main():
     parser.add_argument('--lstm_nfeatures_per_group', dest='lstm_nfeatures_per_group', type=int, default=1, help='specifies how many features processed per timestamp by LSTM')
     parser.add_argument('--patch_gan_loss', dest='patch_gan_loss', action='store_true', help='if specified, use a patch gan loss together with existing loss')
     parser.add_argument('--ndf', dest='ndf', type=int, default=32, help='number of discriminator filters on first layer if using patch GAN loss')
+    parser.add_argument('--ndf_temporal', dest='ndf_temporal', type=int, default=32, help='number of temporal discriminator filters on first layer')
     parser.add_argument('--gan_loss_scale', dest='gan_loss_scale', type=float, default=1.0, help='the scale multiplied to GAN loss before adding to regular loss')
     parser.add_argument('--discrim_nlayers', dest='discrim_nlayers', type=int, default=2, help='number of layers of discriminator')
     parser.add_argument('--discrim_use_trace', dest='discrim_use_trace', action='store_true', help='if specified, use trace info for discriminator')
@@ -1328,6 +1342,11 @@ def main():
     parser.add_argument('--automate_raymarching_def', dest='automate_raymarching_def', action='store_true', help='if specified, automatically choose schedule for raymarching and function def (but not subsampling rate')
     parser.add_argument('--chron_order', dest='chron_order', action='store_true', help='if specified, log trace in their execution order')
     parser.add_argument('--def_loop_log_last', dest='def_loop_log_last', action='store_true', help='if true, log the last execution of function, else, log first execution')
+    parser.add_argument('--no_log_only_return_def_raymarching', dest='log_only_return_def_raymarching', action='store_true', help='if set, do not use default log_only_return_def_raymarching mode')
+    parser.add_argument('--train_temporal_seq', dest='train_temporal_seq', action='store_true', help='if set, training on temporal sequences instead of on single frames')
+    parser.add_argument('--temporal_seq_length', dest='temporal_seq_length', type=int, default=6, help='length of generated temporal seq during training')
+    parser.add_argument('--nframes_temporal_gen', dest='nframes_temporal_gen', type=int, default=3, help='number of frames generator considers in temporal seq mode')
+    parser.add_argument('--nframes_temporal_discrm', dest='nframes_temporal_discrim', type=int, default=3, help='number of frames temporal discrim considers in temporal seq mode')
     
     parser.set_defaults(is_train=False)
     parser.set_defaults(use_batch=False)
@@ -1406,6 +1425,8 @@ def main():
     parser.set_defaults(automate_raymarching_def=False)
     parser.set_defaults(chron_order=False)
     parser.set_defaults(def_loop_log_last=False)
+    parser.set_defaults(log_only_return_def_raymarching=True)
+    parser.set_defaults(train_temporal_seq=False)
 
     args = parser.parse_args()
 
@@ -1509,9 +1530,6 @@ def main_network(args):
     if args.final_layer_channels < 0:
         args.final_layer_channels = actual_conv_channel
         
-    #if args.which_epoch <= 0:
-    #    args.which_epoch = args.epoch
-
     global dilation_threshold
     dilation_threshold = args.dilation_threshold
     global padding_offset
@@ -1608,6 +1626,14 @@ def main_network(args):
         output_pl_w *= 2
         output_pl_h *= 2
         
+    if args.render_only:
+        args.use_queue = False
+        print('setting use_queue to False')
+        
+    if args.train_temporal_seq:
+        # can release this assertion if we complete the logic of using feed_dict
+        assert args.use_queue
+        
     if args.use_dataroot:
         if args.is_train or args.test_training:
             camera_pos_vals = np.load(os.path.join(args.dataroot, 'train.npy'))
@@ -1633,6 +1659,7 @@ def main_network(args):
         
     current_ind = tf.constant(0)
     
+    nexamples = time_vals.shape[0]
     if not args.use_queue:
         output_pl = tf.placeholder(tf.float32, shape=[None, output_pl_h, output_pl_w, output_nc])
         if args.texture_maps != '':
@@ -1644,9 +1671,10 @@ def main_network(args):
             texture_maps = []
     else:
         # TODO: currently use_queue is only valid for the fluid approx shader
+        # and for trippy temporal
         # should generatlize the code if need to use the same pipeline on more shaders
-        assert args.temporal_texture_buffer
-        assert args.geometry == 'texture_approximate_10f'
+        assert args.temporal_texture_buffer or args.train_temporal_seq
+        #assert args.geometry == 'texture_approximate_10f'
         if args.is_train or args.test_training:
             queue_dir_prefix = 'train'
         else:
@@ -1659,74 +1687,120 @@ def main_network(args):
                 nexamples -= 10
                 dataset_range = np.arange(0, nexamples, 10).astype('i')
             else:
-                # for training examples, check camera_pos_val, and only inlucde examples with a valid mouse movement
-                # and 1/5 of the following no mouse frames to a mouse movement sequence
-                # this lowers the fraction of no mouse examples and might better train mouse movement
-                # plus, this can reduce the number of uninteresting dark frames
-                seq_start = None
-                seq_end = None
-                seq_len = None
-                no_mouse_frac = 0.2
-                dataset_range = np.arange(0)
-                for frame_idx in range(camera_pos_vals.shape[0]):
-                    if seq_start is None and camera_pos_vals[frame_idx, 2] > 1 and camera_pos_vals[frame_idx, 5] > 1:
-                        seq_start = frame_idx
-                        if seq_len is not None and seq_end is not None:
-                            if frame_idx - seq_end <= no_mouse_frac * seq_len:
-                                dataset_range = np.concatenate((dataset_range, np.arange(seq_end-seq_len, frame_idx)))
-                            else:
-                                dataset_range = np.concatenate((dataset_range, np.arange(seq_end-seq_len, seq_end+int(no_mouse_frac * seq_len))))
-                            seq_len = None
-                            seq_end = None
-                    if seq_start is not None and (camera_pos_vals[frame_idx, 2] <= 1 or camera_pos_vals[frame_idx, 5] <= 1):
-                        seq_end = frame_idx
-                        seq_len = seq_end - seq_start
-                        seq_start = None
-                
-                if seq_len is not None and seq_end is not None:
-                    if camera_pos_vals.shape[0] - seq_end - 10 <= no_mouse_frac * seq_len:
-                        dataset_range = np.concatenate((dataset_range, np.arange(seq_end-seq_len, camera_pos_vals.shape[0] - 10)))
-                    else:
-                        dataset_range = np.concatenate((dataset_range, np.arange(seq_end-seq_len, seq_end+int(no_mouse_frac * seq_len))))
-            
-                dataset_range = dataset_range.astype('i')
-            if False:
-                if args.is_train:
-                    nexamples -= 10
-                    dataset_range = np.arange(nexamples).astype('i')
+                if args.shader_name == 'fluid_approximate_3pass_10f':
+                    # for training examples, check camera_pos_val, and only inlucde examples with a valid mouse movement
+                    # and 1/5 of the following no mouse frames to a mouse movement sequence
+                    # this lowers the fraction of no mouse examples and might better train mouse movement
+                    # plus, this can reduce the number of uninteresting dark frames
+                    seq_start = None
+                    seq_end = None
+                    seq_len = None
+                    no_mouse_frac = 0.2
+                    dataset_range = np.arange(0)
+                    for frame_idx in range(camera_pos_vals.shape[0]):
+                        if seq_start is None and camera_pos_vals[frame_idx, 2] > 1 and camera_pos_vals[frame_idx, 5] > 1:
+                            seq_start = frame_idx
+                            if seq_len is not None and seq_end is not None:
+                                if frame_idx - seq_end <= no_mouse_frac * seq_len:
+                                    dataset_range = np.concatenate((dataset_range, np.arange(seq_end-seq_len, frame_idx)))
+                                else:
+                                    dataset_range = np.concatenate((dataset_range, np.arange(seq_end-seq_len, seq_end+int(no_mouse_frac * seq_len))))
+                                seq_len = None
+                                seq_end = None
+                        if seq_start is not None and (camera_pos_vals[frame_idx, 2] <= 1 or camera_pos_vals[frame_idx, 5] <= 1):
+                            seq_end = frame_idx
+                            seq_len = seq_end - seq_start
+                            seq_start = None
+
+                    if seq_len is not None and seq_end is not None:
+                        if camera_pos_vals.shape[0] - seq_end - 10 <= no_mouse_frac * seq_len:
+                            dataset_range = np.concatenate((dataset_range, np.arange(seq_end-seq_len, camera_pos_vals.shape[0] - 10)))
+                        else:
+                            dataset_range = np.concatenate((dataset_range, np.arange(seq_end-seq_len, seq_end+int(no_mouse_frac * seq_len))))
+
+                    dataset_range = dataset_range.astype('i')
+                    nexamples = dataset_range.shape[0]
                 else:
-                    nexamples -= 10
-                    dataset_range = np.arange(0, nexamples, 10).astype('i')
+                    dataset_range = np.arange(2, nexamples-12).astype('i')
+                    nexamples -= 14
+
         else:
             dataset_range = np.arange(nexamples).astype('i')
+            ngts = args.temporal_seq_length + args.nframes_temporal_gen - 1
 
         dataset = tf.data.Dataset.from_tensor_slices(dataset_range)
         if args.is_train:
             dataset = dataset.shuffle(nexamples)
         
         def load_image(ind):
-            # TODO: specific to fluid approx, generalize if we need it on other shaders
-            if args.is_train:
-                base_idx = 0
+            # TODO: specific to fluid approx and trippy, generalize if we need it on other shaders
+            if args.temporal_texture_buffer:
+                if args.is_train:
+                    base_idx = 0
+                else:
+                    base_idx = 9000
+            
+                output_arr = np.empty([640, 960, 34])
+                for i in range(10):
+                    imgfile = os.path.join(queue_img_dir, 'test_mouse_seq%05d.png' % (ind + i + 1 + base_idx))
+                    #img = skimage.io.imread(imgfile)
+                    img = np.float32(cv2.imread(imgfile, -1)) / 255.0
+                    output_arr[:, :, i*3:i*3+3] = img
+                init_npy = np.transpose(np.load(os.path.join(queue_npy_dir, 'test_mouse_seq%05d.npy' % (ind + base_idx))), (2, 0, 1))
+                final_npy = np.load(os.path.join(queue_npy_dir, 'test_mouse_seq%05d.npy' % (ind + 10 + base_idx)))
+                # TODO: final_npy also contains NON-CLIPPED RGB color for last frame
+                # should use the CLIPPED RGB color in png to keep the same format as previous frames, or use the more accurate RGB from npy file?
+                output_arr[:, :, -4:] = final_npy[:, :, 3:]
+
+                # e.g. if idx = 1
+                # camera_pos_val[1] is last mouse for 1st frame
+                # and we collect 10 next mouse pos
+                camera_val = np.reshape(camera_pos_vals[ind:ind+11, 3:], 33)
+
+                if args.shader_name == 'fluid_approximate_3pass_no_mouse_perlin':
+                    # also load previous 2 frames and frame 11, 12 for temporal seq discrim
+                    add_gt = np.empty([640, 960, 12])
+                    imgfile = os.path.join(queue_img_dir, 'test_mouse_seq%05d.png' % (ind + base_idx - 1))
+                    img = np.float32(cv2.imread(imgfile, -1)) / 255.0
+                    add_gt[:, :, :3] = img
+                    imgfile = os.path.join(queue_img_dir, 'test_mouse_seq%05d.png' % (ind + base_idx))
+                    img = np.float32(cv2.imread(imgfile, -1)) / 255.0
+                    add_gt[:, :, 3:6] = img
+                    imgfile = os.path.join(queue_img_dir, 'test_mouse_seq%05d.png' % (ind + base_idx + 11))
+                    img = np.float32(cv2.imread(imgfile, -1)) / 255.0
+                    add_gt[:, :, 6:9] = img
+                    imgfile = os.path.join(queue_img_dir, 'test_mouse_seq%05d.png' % (ind + base_idx + 12))
+                    img = np.float32(cv2.imread(imgfile, -1)) / 255.0
+                    add_gt[:, :, 9:] = img
+                    return ind, output_arr, init_npy, camera_val, time_vals[ind+1], add_gt
+                else:
+                    return ind, output_arr, init_npy, camera_val, time_vals[ind+1]
             else:
-                base_idx = 9000
-            output_arr = np.empty([640, 960, 34])
-            for i in range(10):
-                imgfile = os.path.join(queue_img_dir, 'test_mouse_seq%05d.png' % (ind + i + 1 + base_idx))
-                #img = skimage.io.imread(imgfile)
-                img = np.float32(cv2.imread(imgfile, -1)) / 255.0
-                output_arr[:, :, i*3:i*3+3] = img
-            init_npy = np.transpose(np.load(os.path.join(queue_npy_dir, 'test_mouse_seq%05d.npy' % (ind + base_idx))), (2, 0, 1))
-            final_npy = np.load(os.path.join(queue_npy_dir, 'test_mouse_seq%05d.npy' % (ind + 10 + base_idx)))
-            # TODO: final_npy also contains NON-CLIPPED RGB color for last frame
-            # should use the CLIPPED RGB color in png to keep the same format as previous frames, or use the more accurate RGB from npy file?
-            output_arr[:, :, -4:] = final_npy[:, :, 3:]
-            return ind, output_arr, init_npy
+                base_idx = 0
+                output_arr = np.empty([output_pl_h, output_pl_w, output_nc * ngts])
+                for i in range(ngts):
+                    imgfile = os.path.join(queue_img_dir, 'train_ground%d%05d.png' % (i, ind))
+                    img = np.float32(cv2.imread(imgfile, -1)) / 255.0
+                    output_arr[:, :, i*3:i*3+3] = img
+                time_val_seq = np.empty(args.temporal_seq_length)
+                for i in range(args.temporal_seq_length):
+                    time_val_seq[i] = time_vals[ind] + float(i) / 30
+                return ind, output_arr, camera_pos_vals[ind], time_val_seq, tile_start_vals[ind]
         
-        dataset = dataset.map(lambda x: tf.contrib.eager.py_func(func=load_image, inp=[x], Tout=(tf.int32, tf.float32, tf.float32)), num_parallel_calls=4)
-        
-        # TODO: total hack, should generalize later
-        shapes = (tf.TensorShape([]), tf.TensorShape([640, 960, 34]), tf.TensorShape([7, 640, 960]))
+        if args.shader_name in ['fluid_approximate_3pass_10f', 'fluid_approximate']:
+            dataset = dataset.map(lambda x: tf.contrib.eager.py_func(func=load_image, inp=[x], Tout=(tf.int32, tf.float32, tf.float32, tf.float32, tf.float32)), num_parallel_calls=4)
+            # TODO: total hack, should generalize later
+            shapes = (tf.TensorShape([]), tf.TensorShape([640, 960, 34]), tf.TensorShape([7, 640, 960]), tf.TensorShape([33]), tf.TensorShape([]))
+        elif args.shader_name == 'fluid_approximate_3pass_no_mouse_perlin':
+            dataset = dataset.map(lambda x: tf.contrib.eager.py_func(func=load_image, inp=[x], Tout=(tf.int32, tf.float32, tf.float32, tf.float32, tf.float32, tf.float32)), num_parallel_calls=8)
+            # TODO: total hack, should generalize later
+            shapes = (tf.TensorShape([]), tf.TensorShape([640, 960, 34]), tf.TensorShape([7, 640, 960]), tf.TensorShape([33]), tf.TensorShape([]), tf.TensorShape([640, 960, 12]))
+        elif args.shader_name.startswith('trippy'):
+            dataset = dataset.map(lambda x: tf.contrib.eager.py_func(func=load_image, inp=[x], Tout=(tf.int32, tf.float32, tf.float32, tf.float32, tf.int32)), num_parallel_calls=4)
+            shapes = (tf.TensorShape([]), tf.TensorShape([640, 960, output_nc * ngts]), tf.TensorShape([6]), tf.TensorShape([args.temporal_seq_length]), tf.TensorShape([2]))
+        else:
+            raise
+            
         dataset = dataset.apply(tf.contrib.data.assert_element_shape(shapes))
             
         # TODO: for simplificy, only allow batchsize=1 for now
@@ -1736,15 +1810,32 @@ def main_network(args):
         dataset = dataset.prefetch(buffer_size=5)
         iterator = tf.data.Iterator.from_structure(dataset.output_types, dataset.output_shapes)
         train_iterator = iterator.make_initializer(dataset)
-        current_ind, output_pl, texture_maps = iterator.get_next()
-        texture_maps = texture_maps[0]
+
+        if args.shader_name in ['fluid_approximate_3pass_10f', 'fluid_approximate', 'fluid_approximate_3pass_no_mouse_perlin']:
+            if args.shader_name in ['fluid_approximate_3pass_10f', 'fluid_approximate']:
+                current_ind, output_pl, texture_maps, camera_pos, shader_time = iterator.get_next()
+            else:
+                current_ind, output_pl, texture_maps, camera_pos, shader_time, additional_gt_frames = iterator.get_next()
+            texture_maps = texture_maps[0]
+            camera_pos = tf.expand_dims(camera_pos[0], axis=1)
+            shader_time = tf.expand_dims(shader_time[0], axis=0)
+        elif args.shader_name.startswith('trippy'):
+            current_ind, output_pl, camera_pos, shader_time, tile_start = iterator.get_next()
+            camera_pos = tf.tile(tf.expand_dims(camera_pos[0], axis=1), [1, args.temporal_seq_length])
+            shader_time = shader_time[0]
+            h_start = tf.tile(tf.expand_dims(tile_start[0, 0] - padding_offset / 2, axis=0), 6)
+            w_start = tf.tile(tf.expand_dims(tile_start[0, 1] - padding_offset / 2, axis=0), 6)
+        else:
+            raise
+        
         
 
-    if args.geometry != 'texture_approximate_10f':
-        camera_pos = tf.placeholder(dtype, shape=[6, args.batch_size])
-    else:
-        camera_pos = tf.placeholder(dtype, shape=[33, args.batch_size])
-    shader_time = tf.placeholder(dtype, shape=args.batch_size)
+    if not args.use_queue:
+        if args.geometry != 'texture_approximate_10f':
+            camera_pos = tf.placeholder(dtype, shape=[6, args.batch_size])
+        else:
+            camera_pos = tf.placeholder(dtype, shape=[33, args.batch_size])
+        shader_time = tf.placeholder(dtype, shape=args.batch_size)
     if args.additional_input:
         additional_input_pl = tf.placeholder(dtype, shape=[None, output_pl_h, output_pl_w, 1])
     camera_pos_velocity = None
@@ -1768,8 +1859,9 @@ def main_network(args):
         color_inds = []
         texture_inds = []
         if args.tiled_training or args.tile_only:
-            h_start = tf.placeholder(dtype=dtype, shape=args.batch_size)
-            w_start = tf.placeholder(dtype=dtype, shape=args.batch_size)
+            if not args.use_queue:
+                h_start = tf.placeholder(dtype=dtype, shape=args.batch_size)
+                w_start = tf.placeholder(dtype=dtype, shape=args.batch_size)
             if not inference_entire_img_valid:
                 h_offset = args.tiled_h + padding_offset
                 w_offset = args.tiled_w + padding_offset
@@ -1829,7 +1921,7 @@ def main_network(args):
         
 
 
-        input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection, manual_features_only=args.manual_features_only, aux_plus_manual_features=args.aux_plus_manual_features, efficient_trace=args.efficient_trace, collect_loop_statistic=args.collect_loop_statistic, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=feed_samples, fov=args.fov, camera_pos_velocity=camera_pos_velocity, first_last_only=args.first_last_only, last_only=args.last_only, subsample_loops=args.subsample_loops, last_n=args.last_n, first_n=args.first_n, first_n_no_last=args.first_n_no_last, mean_var_only=args.mean_var_only, zero_samples=zero_samples, render_fix_spatial_sample=args.render_fix_spatial_sample, render_fix_temporal_sample=args.render_fix_temporal_sample, render_zero_spatial_sample=args.render_zero_spatial_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples, every_nth=args.every_nth, every_nth_stratified=args.every_nth_stratified, one_hop_parent=args.one_hop_parent, target_idx=target_idx, use_manual_index=args.use_manual_index, manual_index_file=args.manual_index_file, additional_features=args.additional_features, ignore_last_n_scale=args.ignore_last_n_scale, include_noise_feature=args.include_noise_feature, crop_h=args.crop_h, crop_w=args.crop_w, no_noise_feature=args.no_noise_feature, relax_clipping=args.relax_clipping, render_sigma=render_sigma, same_sample_all_pix=args.same_sample_all_pix, stratified_sample_higher_res=args.stratified_sample_higher_res, samples_int=samples_int, texture_maps=texture_maps, partial_trace=args.partial_trace, use_lstm=args.use_lstm, lstm_nfeatures_per_group=args.lstm_nfeatures_per_group, rotate=rotate, flip=flip, use_dataroot=args.use_dataroot, automatic_subsample=args.automatic_subsample, automate_raymarching_def=args.automate_raymarching_def, chron_order=args.chron_order, def_loop_log_last=args.def_loop_log_last, temporal_texture_buffer=args.temporal_texture_buffer, texture_inds=texture_inds)
+        input_to_network = get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection, manual_features_only=args.manual_features_only, aux_plus_manual_features=args.aux_plus_manual_features, efficient_trace=args.efficient_trace, collect_loop_statistic=args.collect_loop_statistic, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=feed_samples, fov=args.fov, camera_pos_velocity=camera_pos_velocity, first_last_only=args.first_last_only, last_only=args.last_only, subsample_loops=args.subsample_loops, last_n=args.last_n, first_n=args.first_n, first_n_no_last=args.first_n_no_last, mean_var_only=args.mean_var_only, zero_samples=zero_samples, render_fix_spatial_sample=args.render_fix_spatial_sample, render_fix_temporal_sample=args.render_fix_temporal_sample, render_zero_spatial_sample=args.render_zero_spatial_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples, every_nth=args.every_nth, every_nth_stratified=args.every_nth_stratified, one_hop_parent=args.one_hop_parent, target_idx=target_idx, use_manual_index=args.use_manual_index, manual_index_file=args.manual_index_file, additional_features=args.additional_features, ignore_last_n_scale=args.ignore_last_n_scale, include_noise_feature=args.include_noise_feature, crop_h=args.crop_h, crop_w=args.crop_w, no_noise_feature=args.no_noise_feature, relax_clipping=args.relax_clipping, render_sigma=render_sigma, same_sample_all_pix=args.same_sample_all_pix, stratified_sample_higher_res=args.stratified_sample_higher_res, samples_int=samples_int, texture_maps=texture_maps, partial_trace=args.partial_trace, use_lstm=args.use_lstm, lstm_nfeatures_per_group=args.lstm_nfeatures_per_group, rotate=rotate, flip=flip, use_dataroot=args.use_dataroot, automatic_subsample=args.automatic_subsample, automate_raymarching_def=args.automate_raymarching_def, chron_order=args.chron_order, def_loop_log_last=args.def_loop_log_last, temporal_texture_buffer=args.temporal_texture_buffer, texture_inds=texture_inds, log_only_return_def_raymarching=args.log_only_return_def_raymarching)
 
         if args.feature_size_only:
             print('feature size: ', int(input_to_network.shape[3]))
@@ -1960,6 +2052,15 @@ def main_network(args):
             regularizer = None
             if not args.use_lstm:
                 input_to_network = feature_reduction_layer(input_to_network, _replace_normalize_weights=replace_normalize_weights)
+                if False:
+                    feed_dict = {}
+                    for i in range(7):
+                        feed_dict[texture_maps[i]] = np.zeros([640, 960])
+                    feed_dict[camera_pos] = np.zeros([33, 1])
+                    feed_dict[shader_time] = np.zeros(1)
+                    sess = tf.Session()
+                    sess.run(tf.global_variables_initializer())
+                    sess.run(input_to_network, feed_dict=feed_dict)
             else:
                 ngroups = input_to_network.shape[-1] // args.lstm_nfeatures_per_group
                 orig_shape = input_to_network.shape
@@ -1993,7 +2094,7 @@ def main_network(args):
     powered_diff = diff ** args.RGB_norm
 
     if args.l2_loss:
-        if (not args.temporal_texture_buffer) and (args.geometry == 'texture_approximate_10f'):
+        if not args.temporal_texture_buffer:
             loss = tf.reduce_mean(powered_diff)
         else:
             loss = tf.reduce_mean(powered_diff, (0, 1, 2))
@@ -2051,26 +2152,33 @@ def main_network(args):
         # descriminator adapted from
         # https://github.com/affinelayer/pix2pix-tensorflow/blob/master/pix2pix.py
         # https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/models/networks.py
-        def create_discriminator(discrim_inputs, discrim_target, sliced_feat=None, other_target=None):
+        def create_discriminator(discrim_inputs, discrim_target, sliced_feat=None, other_target=None, is_temporal=False):
             n_layers = args.discrim_nlayers
             layers = []
 
-            # 2x [batch, height, width, in_channels] => [batch, height, width, in_channels * 2]
-            if (not args.discrim_use_trace) and (not args.discrim_paired_input):
-                concat_list = [discrim_inputs, discrim_target]
-            elif args.discrim_use_trace:
-                concat_list = [discrim_inputs, sliced_feat]
-                if args.discrim_paired_input:
-                    concat_list += [discrim_target, other_target]
+            if discrim_inputs is not None:
+                # 2x [batch, height, width, in_channels] => [batch, height, width, in_channels * 2]
+                if (not args.discrim_use_trace) and (not args.discrim_paired_input):
+                    concat_list = [discrim_inputs, discrim_target]
+                elif args.discrim_use_trace:
+                    concat_list = [discrim_inputs, sliced_feat]
+                    if args.discrim_paired_input:
+                        concat_list += [discrim_target, other_target]
+                    else:
+                        concat_list += [discrim_target]
                 else:
-                    concat_list += [discrim_target]
+                    concat_list = [discrim_target, other_target]
+
+                input = tf.concat(concat_list, axis=3)
             else:
-                concat_list = [discrim_target, other_target]
-            
-            input = tf.concat(concat_list, axis=3)
+                input = discrim_target
+                
             d_network = input
             #n_ch = 32
-            n_ch = args.ndf
+            if is_temporal:
+                n_ch = args.ndf_temporal
+            else:
+                n_ch = args.ndf
             
             # layer_0: [batch, 256, 256, in_channels * 2] => [batch, 128, 128, ndf]
             # layer_1: [batch, 128, 128, ndf] => [batch, 64, 64, ndf * 2]
@@ -2116,23 +2224,82 @@ def main_network(args):
                         sliced_feat = tf.slice(discrim_feat, [0, padding_offset // 2, padding_offset // 2, 0], [args.batch_size, output_pl_h, output_pl_w, args.conv_channel_no])
             else:
                 sliced_feat = None
+                
+            predict_real = None
+            predict_fake = None
+            if not args.temporal_texture_buffer:
+                with tf.name_scope("discriminator_real"):
+                    with tf.variable_scope("discriminator"):
+                        predict_real = create_discriminator(condition_input, output, sliced_feat, network)
 
-            with tf.name_scope("discriminator_real"):
-                with tf.variable_scope("discriminator"):
-                    predict_real = create_discriminator(condition_input, output, sliced_feat, network)
-
-            with tf.name_scope("discriminator_fake"):
-                with tf.variable_scope("discriminator", reuse=True):
-                    predict_fake = create_discriminator(condition_input, network, sliced_feat, output)
-                    
-            if args.temporal_texture_buffer:
-                with tf.name_scope("discriminator_fake_still"):
+                with tf.name_scope("discriminator_fake"):
                     with tf.variable_scope("discriminator", reuse=True):
-                        # TODO: just a hack that only works for fluid appxo
-                        # another discriminator loss saying that still images are false
-                        # use first 3 channels because at some point earlier in the code, color_inds are reversed
-                        predict_fake_still = create_discriminator(condition_input, tf.concat((tf.tile(condition_input[:, :, :, :3], (1, 1, 1, 10)), network[:, :,:, -4:]), 3), sliced_feat, output)
-            
+                        predict_fake = create_discriminator(condition_input, network, sliced_feat, output)
+            else:
+                if args.shader_name in ['fluid_approximate_3pass_10f', 'fluid_approximate']:
+                    with tf.name_scope("discriminator_real"):
+                        with tf.variable_scope("discriminator"):
+                            predict_real = create_discriminator(condition_input, output, sliced_feat, network)
+
+                    with tf.name_scope("discriminator_fake"):
+                        with tf.variable_scope("discriminator", reuse=True):
+                            predict_fake = create_discriminator(condition_input, network, sliced_feat, output)
+
+                    with tf.name_scope("discriminator_fake_still"):
+                        with tf.variable_scope("discriminator", reuse=True):
+                            # TODO: just a hack that only works for fluid appxo
+                            # another discriminator loss saying that still images are false
+                            # use first 3 channels because at some point earlier in the code, color_inds are reversed
+                            predict_fake_still = create_discriminator(condition_input, tf.concat((tf.tile(condition_input[:, :, :, :3], (1, 1, 1, 10)), network[:, :,:, -4:]), 3), sliced_feat, output)
+                        
+                elif args.shader_name == 'fluid_approximate_3pass_no_mouse_perlin':
+                    # unconditioned single frame discrim
+                    nimages = (output_nc - 4) // 3
+                    predict_real_single = []
+                    predict_fake_single = []
+                    if True:
+                        with tf.name_scope("discriminator_real"):
+                            with tf.variable_scope("discriminator_spatial", reuse=tf.AUTO_REUSE):
+                                for i in range(nimages):
+                                    predict_real_single.append(create_discriminator(None, output[:, :, :, 3*i:3*i+3]))
+                        with tf.name_scope("discriminator_fake"):
+                            with tf.variable_scope("discriminator_spatial", reuse=tf.AUTO_REUSE):
+                                for i in range(nimages):
+                                    predict_fake_single.append(create_discriminator(None, network[:, :, :, 3*i:3*i+3]))
+                                
+                    # unconditions seq discrim (L=3)
+                    predict_real_seq = []
+                    predict_fake_seq = []
+                    if True:
+                        with tf.name_scope("discriminator_real"):
+                            with tf.variable_scope("discriminator_temporal", reuse=tf.AUTO_REUSE):
+                                for i in range(-1, nimages + 1):
+                                    if i == -1:
+                                        current_seq = tf.concat((additional_gt_frames[:, :, :, :6], output[:, :, :, :3]), 3)
+                                    elif i == 0:
+                                        current_seq = tf.concat((additional_gt_frames[:, :, :, 3:6], output[:, :, :, :6]), 3)
+                                    elif i == nimages - 1:
+                                        current_seq = tf.concat((output[:, :, :, i*3-3:i*3+3], additional_gt_frames[:, :, :, 6:9]), 3)
+                                    elif i == nimages:
+                                        current_seq = tf.concat((output[:, :, :, i*3-3:i*3], additional_gt_frames[:, :, :, 6:]), 3)
+                                    else:
+                                        current_seq = output[:, :, :, i*3-3:i*3+6]
+                                    predict_real_seq.append(create_discriminator(None, current_seq))
+                        with tf.name_scope("discriminator_fake"):
+                            with tf.variable_scope("discriminator_temporal", reuse=tf.AUTO_REUSE):
+                                for i in range(-1, nimages + 1):
+                                    if i == -1:
+                                        current_seq = tf.concat((additional_gt_frames[:, :, :, :6], network[:, :, :, :3]), 3)
+                                    elif i == 0:
+                                        current_seq = tf.concat((additional_gt_frames[:, :, :, 3:6], network[:, :, :, :6]), 3)
+                                    elif i == nimages - 1:
+                                        current_seq = tf.concat((network[:, :, :, i*3-3:i*3+3], additional_gt_frames[:, :, :, 6:9]), 3)
+                                    elif i == nimages:
+                                        current_seq = tf.concat((network[:, :, :, i*3-3:i*3], additional_gt_frames[:, :, :, 6:]), 3)
+                                    else:
+                                        current_seq = output[:, :, :, i*3-3:i*3+6]
+                                    predict_fake_seq.append(create_discriminator(None, current_seq))
+                                          
             if args.gan_loss_style == 'wgan':
                 with tf.name_scope("discriminator_sample"):
                     with tf.variable_scope("discriminator", reuse=True):
@@ -2168,10 +2335,24 @@ def main_network(args):
             with tf.name_scope("discriminator_loss"):
                 #loss_real = tf.nn.sigmoid_cross_entropy_with_logits(logits=predict_real, labels=tf.ones_like(predict_real))
                 #loss_fake = tf.nn.sigmoid_cross_entropy_with_logits(logits=predict_fake, labels=tf.zeros_like(predict_fake))
-                loss_real = gan_loss_func(predict_real, True)
-                loss_fake = gan_loss_func(predict_fake, False)
-                if args.temporal_texture_buffer:
-                    loss_fake = loss_fake + gan_loss_func(predict_fake_still, False)
+                
+                if predict_real is not None and predict_fake is not None:
+                    loss_real = gan_loss_func(predict_real, True)
+                    loss_fake = gan_loss_func(predict_fake, False)
+                    if args.temporal_texture_buffer:
+                        loss_fake = loss_fake + gan_loss_func(predict_fake_still, False)
+                else:
+                    loss_real = 0.0
+                    loss_fake = 0.0
+                    for predict in predict_real_single:
+                        loss_real += gan_loss_func(predict, True)
+                    for predict in predict_fake_single:
+                        loss_fake += gan_loss_func(predict, False)
+                    for predict in predict_real_seq:
+                        loss_real += gan_loss_func(predict, True)
+                    for predict in predict_fake_seq:
+                        loss_fake += gan_loss_func(predict, False)
+                
                 discrim_loss = tf.reduce_mean(loss_real + loss_fake)
                 
                 if args.gan_loss_style == 'wgan':
@@ -2179,8 +2360,9 @@ def main_network(args):
                     # modify the penalty a little bit, don't want to deal with sqrt in tensorflow since it's not stable
                     gradient_penalty = tf.reduce_mean((sample_gradient ** 2.0 - 1.0) ** 2.0)
                     discrim_loss = discrim_loss + 10.0 * gradient_penalty
-                
+            
             with tf.name_scope("discriminator_train"):
+
                 discrim_tvars = [var for var in tf.trainable_variables() if var.name.startswith("discriminator")]
                 discrim_optim = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
 
@@ -2189,13 +2371,20 @@ def main_network(args):
                     discrim_step = tf.cond(tf.floormod(step_count, args.discrim_train_steps) < 1, lambda: discrim_optim.minimize(discrim_loss, var_list=discrim_tvars), lambda: tf.no_op())
                 else:
                     discrim_step = discrim_optim.minimize(discrim_loss, var_list=discrim_tvars)
-            
+
             discrim_saver = tf.train.Saver(discrim_tvars, max_to_keep=1000)
             
         
             with tf.name_scope("generator_loss"):
                 #gen_loss_GAN = tf.nn.sigmoid_cross_entropy_with_logits(logits=predict_fake, labels=tf.ones_like(predict_fake))
-                gen_loss_GAN = gan_loss_func(predict_fake, True)
+                gen_loss_GAN = 0
+                if predict_fake is not None:
+                    gen_loss_GAN = gan_loss_func(predict_fake, True)
+                else:
+                    for predict in predict_fake_single:
+                        gen_loss_GAN += gan_loss_func(predict, True)
+                    for predict in predict_fake_seq:
+                        gen_loss_GAN += gan_loss_func(predict, True)
                 gen_loss_GAN = tf.reduce_mean(gen_loss_GAN)
                 gen_loss = args.gan_loss_scale * gen_loss_GAN + loss
                 
@@ -2325,28 +2514,7 @@ def main_network(args):
     num_epoch = args.epoch
     #assert num_epoch % save_frequency == 0
 
-    if args.use_dataroot:
-        if args.is_train or args.test_training:
-            camera_pos_vals = np.load(os.path.join(args.dataroot, 'train.npy'))
-            time_vals = np.load(os.path.join(args.dataroot, 'train_time.npy'))
-            if args.tile_only:
-                tile_start_vals = np.load(os.path.join(args.dataroot, 'train_start.npy'))
-        else:
-            if not args.temporal_texture_buffer:
-                camera_pos_vals = np.concatenate((
-                                    np.load(os.path.join(args.dataroot, 'test_close.npy')),
-                                    np.load(os.path.join(args.dataroot, 'test_far.npy')),
-                                    np.load(os.path.join(args.dataroot, 'test_middle.npy'))
-                                    ), axis=0)
-            else:
-                camera_pos_vals = np.load(os.path.join(args.dataroot, 'test.npy'))
-            time_vals = np.load(os.path.join(args.dataroot, 'test_time.npy'))
-    else:
-        if len(args.camera_pos_file):
-            camera_pos_vals = np.load(args.camera_pos_file)[:args.camera_pos_len]
-        else:
-            camera_pos_vals = np.random.random([args.camera_pos_len, 6])
-        time_vals = np.zeros(camera_pos_vals.shape[0])
+    
 
     def read_ind(img_arr, name_arr, id, is_npy):
         img_arr[id] = read_name(name_arr[id], is_npy)
@@ -2410,8 +2578,9 @@ def main_network(args):
                 output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
                 bad_example = np.expand_dims(read_name(os.path.join(bad_dir, '%06d.png' % (i+1)), False, False), 0)
             camera_val = np.expand_dims(camera_pos_vals[i, :], axis=1)
-            feed_dict[camera_pos] = camera_val
-            feed_dict[shader_time] = time_vals[i:i+1]
+            if not args.use_queue:
+                feed_dict[camera_pos] = camera_val
+                feed_dict[shader_time] = time_vals[i:i+1]
             if render_current:
                 current_output = sess.run(network, feed_dict=feed_dict)
                 cv2.imwrite('%s/%06d.png' % (current_dir, i+1), np.uint8(255.0 * np.clip(current_output[0, :, :, :], 0.0, 1.0)))
@@ -2502,19 +2671,18 @@ def main_network(args):
         if args.write_summary:
             train_writer = tf.summary.FileWriter(args.name, sess.graph)
         # shader specific hack: if in fluid approximate mode (or temporal_texture_buffer=True), then sample number is 11 less than number of png / npy files in dataroot dir
-        nexamples = time_vals.shape[0]
+        
+        rec_arr_len = time_vals.shape[0]
         if args.temporal_texture_buffer:
-            nexamples -= 10
-        all=np.zeros(int(nexamples * ntiles_w * ntiles_h), dtype=float)
-        all_l2=np.zeros(int(nexamples * ntiles_w * ntiles_h), dtype=float)
-        all_sparsity=np.zeros(int(nexamples * ntiles_w * ntiles_h), dtype=float)
-        all_regularization = np.zeros(int(nexamples * ntiles_w * ntiles_h), dtype=float)
-        all_training_loss = np.zeros(int(nexamples * ntiles_w * ntiles_h), dtype=float)
-        all_perceptual = np.zeros(int(nexamples * ntiles_w * ntiles_h), dtype=float)
-        all_gen_gan_loss = np.zeros(int(nexamples * ntiles_w * ntiles_h), dtype=float)
-        all_discrim_loss = np.zeros(int(nexamples * ntiles_w * ntiles_h), dtype=float)
-
-        occurance = np.zeros(int(nexamples * ntiles_w * ntiles_h), dtype=int)
+            rec_arr_len -= 10
+        all=np.zeros(int(rec_arr_len * ntiles_w * ntiles_h), dtype=float)
+        all_l2=np.zeros(int(rec_arr_len * ntiles_w * ntiles_h), dtype=float)
+        all_sparsity=np.zeros(int(rec_arr_len * ntiles_w * ntiles_h), dtype=float)
+        all_regularization = np.zeros(int(rec_arr_len * ntiles_w * ntiles_h), dtype=float)
+        all_training_loss = np.zeros(int(rec_arr_len * ntiles_w * ntiles_h), dtype=float)
+        all_perceptual = np.zeros(int(rec_arr_len * ntiles_w * ntiles_h), dtype=float)
+        all_gen_gan_loss = np.zeros(int(rec_arr_len * ntiles_w * ntiles_h), dtype=float)
+        all_discrim_loss = np.zeros(int(rec_arr_len * ntiles_w * ntiles_h), dtype=float)
 
         alpha_start = -3
         alpha_end = 0
@@ -2546,7 +2714,6 @@ def main_network(args):
             permutation = np.random.permutation(int(nexamples * ntiles_h * ntiles_w))
             nupdates = permutation.shape[0] if not args.use_batch else int(np.ceil(float(time_vals.shape[0]) / args.batch_size))
             sub_epochs = 1
-            occurance += 1
             
             if args.finetune and epoch <= num_transition_epoch:
                 alpha_val = alpha_schedule[epoch-1]
@@ -2643,20 +2810,20 @@ def main_network(args):
                         if args.additional_input:
                             feed_dict[additional_input_pl] = additional_arr
 
-                    if not args.temporal_texture_buffer:
-                        camera_val = camera_pos_vals[frame_idx, :].transpose()
-                        feed_dict[camera_pos] = camera_val
-                        feed_dict[shader_time] = time_vals[frame_idx]
-                    else:
-                        assert args.batch_size == 1
-                        camera_val = np.empty([33, 1])
-                        # e.g. if idx = 1
-                        # camera_pos_val[1] is last mouse for 1st frame
-                        # and we collect 10 next mouse pos
-                        camera_val[:, 0] = np.reshape(camera_pos_vals[frame_idx[0]:frame_idx[0]+11, 3:], 33)
-                        feed_dict[camera_pos] = camera_val
-                        feed_dict[shader_time] = time_vals[frame_idx]
-                        if not args.use_queue:
+                    if not args.use_queue:
+                        if not args.temporal_texture_buffer:
+                            camera_val = camera_pos_vals[frame_idx, :].transpose()
+                            feed_dict[camera_pos] = camera_val
+                            feed_dict[shader_time] = time_vals[frame_idx]
+                        else:
+                            assert args.batch_size == 1
+                            camera_val = np.empty([33, 1])
+                            # e.g. if idx = 1
+                            # camera_pos_val[1] is last mouse for 1st frame
+                            # and we collect 10 next mouse pos
+                            camera_val[:, 0] = np.reshape(camera_pos_vals[frame_idx[0]:frame_idx[0]+11, 3:], 33)
+                            feed_dict[camera_pos] = camera_val
+                            feed_dict[shader_time] = time_vals[frame_idx]
                             current_texture_maps = np.transpose(np.load(input_names[frame_idx[0]]), (2, 0, 1))
                             with warnings.catch_warnings():
                                 warnings.simplefilter("ignore")
@@ -2703,7 +2870,6 @@ def main_network(args):
                     cnt += args.batch_size if args.use_batch else 1
                     print("%d %d %.5f %.5f %.2f %.2f %s %d"%(epoch,cnt,current,np.mean(all[np.where(all)]),time.time()-st, st2-st1,os.getcwd().split('/')[-2], current_slice[0]))
 
-            print(occurance)
             avg_loss = np.mean(all[np.where(all)])
             avg_loss_l2 = np.mean(all_l2[np.where(all_l2)])
             #avg_loss_sparsity = np.mean(all_sparsity[np.where(all_sparsity)])
@@ -2727,6 +2893,7 @@ def main_network(args):
                 summary.value.add(tag='avg_perceptual', simple_value=avg_perceptual)
                 summary.value.add(tag='avg_gen_gan', simple_value=avg_gen_gan)
                 summary.value.add(tag='avg_discrim', simple_value=avg_discrim)
+                train_writer.add_summary(summary, epoch)
 
             os.makedirs("%s/%04d"%(args.name,epoch))
             target=open("%s/%04d/score.txt"%(args.name,epoch),'w')
@@ -2772,21 +2939,6 @@ def main_network(args):
             if args.render_only:
                 camera_pos_vals = np.load(args.render_camera_pos)
                 time_vals = np.load(args.render_t)
-            elif args.test_training:
-                camera_pos_vals = np.load(os.path.join(args.dataroot, 'train.npy'))
-                time_vals = np.load(os.path.join(args.dataroot, 'train_time.npy'))
-                if args.tile_only and (not inference_entire_img_valid):
-                    tile_start_vals = np.load(os.path.join(args.dataroot, 'train_start.npy'))
-            else:
-                if not args.temporal_texture_buffer:
-                    camera_pos_vals = np.concatenate((
-                                        np.load(os.path.join(args.dataroot, 'test_close.npy')),
-                                        np.load(os.path.join(args.dataroot, 'test_far.npy')),
-                                        np.load(os.path.join(args.dataroot, 'test_middle.npy'))
-                                        ), axis=0)
-                else:
-                    camera_pos_vals = np.load(os.path.join(args.dataroot, 'test.npy'))
-                time_vals = np.load(os.path.join(args.dataroot, 'test_time.npy'))
 
         if args.render_only:
             debug_dir = args.name + '/render'
@@ -2817,6 +2969,8 @@ def main_network(args):
         if args.render_only:
             shutil.copyfile(args.render_camera_pos, os.path.join(debug_dir, 'camera_pos.npy'))
             shutil.copyfile(args.render_t, os.path.join(debug_dir, 'render_t.npy'))
+            if args.temporal_texture_buffer:
+                shutil.copyfile(args.render_temporal_texture, os.path.join(debug_dir, 'init_texture.npy'))
 
         python_time = numpy.zeros(time_vals.shape[0])
         nburns = 10
@@ -2844,8 +2998,9 @@ def main_network(args):
             if args.input_nc > target_channel_max:
                 # workaround due to an incorrect tensorflow dependency on placeholders...
                 #feed_dict = {camera_pos: camera_pos_vals[0, :], shader_time: time_vals[0:1]}
-                feed_dict[camera_pos] = camera_pos_vals[0:1, :].transpose()
-                feed_dict[shader_time] = time_vals[0:1]
+                if not args.use_queue:
+                    feed_dict[camera_pos] = camera_pos_vals[0:1, :].transpose()
+                    feed_dict[shader_time] = time_vals[0:1]
                 # workaround for tensorflow's weird compute graph that's asking for placeholder values more than needed
                 vec_val = sess.run(sparsity_vec)
                 if isinstance(target_channel, int):
@@ -2859,8 +3014,10 @@ def main_network(args):
 
 
         if args.render_only:
-            feed_dict[h_start] = np.array([- padding_offset / 2])
-            feed_dict[w_start] = np.array([- padding_offset / 2])
+            if h_start.op.type == 'Placeholder':
+                feed_dict[h_start] = np.array([- padding_offset / 2])
+            if w_start.op.type == 'Placeholder':
+                feed_dict[w_start] = np.array([- padding_offset / 2])
             if args.train_with_random_rotation:
                 feed_dict[rotate] = 0
                 feed_dict[flip] = 0
@@ -2868,12 +3025,24 @@ def main_network(args):
                 init_texture = np.transpose(np.load(args.render_temporal_texture), (2, 0, 1))
                 for k in range(len(texture_maps)):
                     feed_dict[texture_maps[k]] = init_texture[k]
-                output_texture = tf.stack([debug_input[:, :, :, ind] for ind in texture_inds], axis=3)
 
-            for i in range(time_vals.shape[0]):
+            if args.temporal_texture_buffer:
+                nexamples = time_vals.shape[0] // 10 - 1
+            else:
+                nexamples = time_vals.shape[0]
+            for i in range(nexamples):
                 #feed_dict = {camera_pos: camera_pos_vals[i:i+1, :].transpose(), shader_time: time_vals[i:i+1]}
-                feed_dict[camera_pos] = camera_pos_vals[i:i+1, :].transpose()
-                feed_dict[shader_time] = time_vals[i:i+1]
+                
+                if args.temporal_texture_buffer:
+                    # TODO: this only works for fluid approx app
+                    camera_val = np.empty([33, 1])
+                    camera_val[:, 0] = np.reshape(camera_pos_vals[i*10:i*10+11, 3:], 33)
+                    feed_dict[camera_pos] = camera_val
+                    feed_dict[shader_time] = time_vals[i*10:i*10+1]
+                else:
+                    feed_dict[camera_pos] = camera_pos_vals[i:i+1, :].transpose()
+                    feed_dict[shader_time] = time_vals[i:i+1]
+                
                 if args.additional_input:
                     feed_dict[additional_input_pl] = np.expand_dims(np.expand_dims(read_name(val_add_names[i], True), axis=2), axis=0)
 
@@ -2891,16 +3060,24 @@ def main_network(args):
                 if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
                     output_buffer /= args.estimator_samples
                     output_image[:] = output_buffer[:]
-                output_image = np.clip(output_image,0.0,1.0)
-                output_image *= 255.0
+                
                 if output_nc == 3:
+                    output_image = np.clip(output_image,0.0,1.0)
+                    output_image *= 255.0
                     cv2.imwrite("%s/%06d.png"%(debug_dir, i+1),np.uint8(output_image[0,:,:,:]))
                 else:
-                    assert output_nc % 3 == 0
-                    for img_id in range(output_nc // 3):
-                        cv2.imwrite("%s/%05d%d.png"%(debug_dir, i+1, img_id),np.uint8(output_image[0,:,:,3*img_id+3*img_id+3]))
+                    assert (output_nc - 4) % 3 == 0
+                    nimages = (output_nc - 4) // 3
+                    output_image[:, :, :, :3*nimages] = np.clip(output_image[:, :, :, :3*nimages],0.0,1.0)
+                    output_image[:, :, :, :3*nimages] *= 255.0
+                    for img_id in range(nimages):
+                        cv2.imwrite("%s/%05d%d.png"%(debug_dir, i+1, img_id),np.uint8(output_image[0,:,:,3*img_id:3*img_id+3]))
+                    texture_map_start = output_nc - len(texture_maps)
+                    for k in range(len(texture_maps)):
+                        feed_dict[texture_maps[k]] = output_image[0, :, :, texture_map_start+k]
+                        
                 print('finished', i)
-            os.system('ffmpeg -i %s -r 30 -c:v libx264 -preset slow -crf 0 -r 30 %s'%(os.path.join(debug_dir, '%06d.png'), os.path.join(debug_dir, 'video.mp4')))
+            os.system('ffmpeg %s -i %s -r 30 -c:v libx264 -preset slow -crf 0 -r 30 %s'%('-start_number 10' if args.temporal_texture_buffer else '', os.path.join(debug_dir, '%06d.png'), os.path.join(debug_dir, 'video.mp4')))
             open(os.path.join(debug_dir, 'index.html'), 'w+').write("""
 <html>
 <body>
@@ -2925,17 +3102,18 @@ def main_network(args):
                 if args.train_with_random_rotation:
                     feed_dict[rotate] = 0
                     feed_dict[flip] = 0
-                camera_val = np.expand_dims(camera_pos_vals[i, :], axis=1)
-                #feed_dict = {camera_pos: camera_val, shader_time: time_vals[i:i+1]}
-                feed_dict[camera_pos] = camera_val
-                feed_dict[shader_time] = time_vals[i:i+1]
-                
-                if args.use_dataroot and args.temporal_texture_buffer:
-                    # TODO: this only works for fluid approx app
-                    camera_val = np.empty([33, 1])
-                    camera_val[:, 0] = np.reshape(camera_pos_vals[i*10:i*10+11, 3:], 33)
+                if not args.use_queue:
+                    camera_val = np.expand_dims(camera_pos_vals[i, :], axis=1)
+                    #feed_dict = {camera_pos: camera_val, shader_time: time_vals[i:i+1]}
                     feed_dict[camera_pos] = camera_val
-                    feed_dict[shader_time] = time_vals[i*10:i*10+1]
+                    feed_dict[shader_time] = time_vals[i:i+1]
+
+                    if args.use_dataroot and args.temporal_texture_buffer:
+                        # TODO: this only works for fluid approx app
+                        camera_val = np.empty([33, 1])
+                        camera_val[:, 0] = np.reshape(camera_pos_vals[i*10:i*10+11, 3:], 33)
+                        feed_dict[camera_pos] = camera_val
+                        feed_dict[shader_time] = time_vals[i*10:i*10+1]
 
                 
                 if not args.use_queue:
@@ -3097,18 +3275,19 @@ def main_network(args):
                 all_l2[i] = l2_loss_val
                 all_grad[i] = grad_loss_val
                 all_perceptual[i] = perceptual_loss_val
-                output_image=np.clip(output_image,0.0,1.0)
-                #print("output_image clipped")
-                output_image *= 255.0
-                #print("output_image scaled")
+                
 
                 if output_nc == 3:
+                    output_image=np.clip(output_image,0.0,1.0)
+                    output_image *= 255.0
                     cv2.imwrite("%s/%06d.png"%(debug_dir, i+1),np.uint8(output_image[0,:,:,:]))
                 else:
                     assert args.temporal_texture_buffer
                     assert args.geometry == 'texture_approximate_10f'
                     assert (output_nc - 4) % 3 == 0
                     nimages = (output_nc - 4) // 3
+                    output_image[:, :, :, :3*nimages] = np.clip(output_image[:, :, :, :3*nimages],0.0,1.0)
+                    output_image[:, :, :, :3*nimages] *= 255.0
                     for img_id in range(nimages):
                         cv2.imwrite("%s/%06d%d.png"%(debug_dir, i+1, img_id),np.uint8(output_image[0,:,:,3*img_id:3*img_id+3]))
 

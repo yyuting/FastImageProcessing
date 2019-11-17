@@ -95,6 +95,23 @@ def compute_metric(dir1, dir2, mode, mask=None, thre=0):
         print(mask_files)
         assert len(mask_files) == len(img_files1)
 
+    skip_first_n = 0
+    if '--skip_first_n' in sys.argv:
+        try:
+            skip_first_n = int(sys.argv[sys.argv.index('--skip_first_n')+1])
+        except:
+            skip_first_n = 0
+            
+    skip_last_n = 0
+    if '--skip_last_n' in sys.argv:
+        try:
+            skip_last_n = int(sys.argv[sys.argv.index('--skip_last_n')+1])
+        except:
+            skip_last_n = 0
+    
+    img_files2 = img_files2[skip_first_n:]
+    if skip_last_n > 0:
+        img_files2 = img_files2[:-skip_last_n]
     assert len(img_files1) == len(img_files2)
 
     # locate GT gradient directory
