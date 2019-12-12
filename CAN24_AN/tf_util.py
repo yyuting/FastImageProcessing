@@ -44,11 +44,17 @@ def new_mul(x, y):
     except:
         pass
     try:
-        if x.dtype == bool and y.dtype == bool:
+        if (x.dtype == bool) and (y.dtype == bool):
             return tf.logical_and(x, y)
     except:
-        pass
+        if x == True:
+            return y
+        if y == True:
+            return x
+        if x == False or y == False:
+            return False
     return tf.multiply(x, y)
+
 
 def new_add(x, y):
     if isinstance(x, tf.Tensor) and x.dtype == bool:
@@ -72,7 +78,7 @@ def select_nosmooth(a, b, c):
     base_tensor = None
     count = 0
     for tensor in [a, b, c]:
-        if not isinstance(tensor, (int, float, bool)):
+        if not isinstance(tensor, (int, float, bool, np.bool_)):
             all_scalar = False
             base_tensor = tensor
             count += 1
@@ -129,6 +135,8 @@ def tf_np_wrapper(func):
                 return 2.0 * float(x > 0.0) - 1.0
         elif func == 'random_normal':
             return tf.random_normal(tf.shape(x), dtype=x.dtype)
+        elif func == 'nequal':
+            return tf.math.logical_not(tf.equal(x, y))
             #return 0.0
         #elif func == 'sqrt':
             #ans = tf.sqrt(x)
