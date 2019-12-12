@@ -50,7 +50,7 @@ padding_offset = 32
 
 deprecated_options = ['feature_reduction_channel_by_samples', 'is_npy', 'orig_channel', 'nsamples', 'is_bin', 'upsample_scale', 'upsample_single', 'upsample_shrink_feature', 'clip_weights', 'deconv', 'share_weights', 'clip_weights_percentage', 'encourage_sparse_features', 'collect_validate_loss', 'validate_loss_freq', 'collect_validate_while_training', 'clip_weights_percentage_after_normalize', 'normalize_weights', 'normalize_weights', 'rowwise_L2_normalize', 'Frobenius_normalize', 'bilinear_upsampling', 'full_resolution', 'unet', 'unet_base_channel', 'learn_scale', 'soft_scale', 'scale_ratio', 'use_sigmoid', 'orig_rgb', 'use_weight_map', 'render_camera_pos_velocity', 'gradient_loss', 'normalize_grad', 'grayscale_grad', 'cos_sim', 'gradient_loss_scale', 'gradient_loss_all_pix', 'gradient_loss_canny_weight', 'two_stage_training', 'new_minimizer', 'weight_map_add', 'sigmoid_scaling', 'visualize_scaling', 'visualize_ind', 'test_tiling', 'motion_blur', 'dynamic_training_samples', 'dynamic_training_mode', 'automatic_find_gpu', 'test_rotation', 'abs_normalize', 'feature_reduction_regularization_scale', 'learn_sigma']
 
-def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', feature_w=[], color_inds=[], intersection=True, manual_features_only=False, aux_plus_manual_features=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, first_n=-1, first_n_no_last=-1, mean_var_only=False, zero_samples=False, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None, every_nth=-1, every_nth_stratified=False, one_hop_parent=False, target_idx=[], use_manual_index=False, manual_index_file='', additional_features=True, ignore_last_n_scale=0, include_noise_feature=False, crop_h=-1, crop_w=-1, no_noise_feature=False, relax_clipping=False, render_sigma=None, same_sample_all_pix=False, stratified_sample_higher_res=False, samples_int=[None], texture_maps=[], partial_trace=1.0, use_lstm=False, lstm_nfeatures_per_group=1, rotate=0, flip=0, use_dataroot=True, automatic_subsample=False, automate_raymarching_def=False, chron_order=False, def_loop_log_last=False, temporal_texture_buffer=False, texture_inds=[], log_only_return_def_raymarching=True, debug=[], SELECT_FEATURE_THRE=200, n_boids=40, log_getitem=False):
+def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', feature_w=[], color_inds=[], intersection=True, manual_features_only=False, aux_plus_manual_features=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, first_n=-1, first_n_no_last=-1, mean_var_only=False, zero_samples=False, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None, every_nth=-1, every_nth_stratified=False, one_hop_parent=False, target_idx=[], use_manual_index=False, manual_index_file='', additional_features=True, ignore_last_n_scale=0, include_noise_feature=False, crop_h=-1, crop_w=-1, no_noise_feature=False, relax_clipping=False, render_sigma=None, same_sample_all_pix=False, stratified_sample_higher_res=False, samples_int=[None], texture_maps=[], partial_trace=1.0, use_lstm=False, lstm_nfeatures_per_group=1, rotate=0, flip=0, use_dataroot=True, automatic_subsample=False, automate_raymarching_def=False, chron_order=False, def_loop_log_last=False, temporal_texture_buffer=False, texture_inds=[], log_only_return_def_raymarching=True, debug=[], SELECT_FEATURE_THRE=200, n_boids=40, log_getitem=True):
     # 2x_1sample on margo
     #camera_pos = np.load('/localtmp/yuting/out_2x1_manual_carft/train.npy')[0, :]
 
@@ -136,6 +136,8 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             shader_args = ' render_boids_coarse ' + geometry + ' none'
         elif shader_name == 'venice_simplified_proxy':
             shader_args = ' render_venice_simplified_proxy ' + geometry + ' none'
+        elif shader_name == 'venice_simplified_proxy2':
+            shader_args = ' render_venice_simplified_proxy2 ' + geometry + ' none'
 
         render_util_dir = os.path.abspath('../../global_opt/proj/apps')
         render_single_full_name = os.path.abspath(os.path.join(render_util_dir, 'render_single.py'))
@@ -201,8 +203,8 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             render_single_cmd = render_single_cmd + ' --log_only_return_def_raymarching'
         if shader_name.startswith('boids'):
             render_single_cmd = render_single_cmd + ' --n_boids %d' % n_boids
-        if log_getitem:
-            render_single_cmd = render_single_cmd + ' --log_getitem'
+        if not log_getitem:
+            render_single_cmd = render_single_cmd + ' --no_log_getitem'
         entire_cmd = 'cd ' + render_util_dir + ' && ' + render_single_cmd + ' && cd ' + cwd
         ans = os.system(entire_cmd)
         #ans = subprocess.call('cd ' + render_util_dir + ' && source activate py36 && python ' + render_single_full_name + ' out ' + shader_args + ' --is-tf --code-only --log-intermediates && source activate tensorflow35 && cd ' + cwd)
@@ -1373,7 +1375,8 @@ def main():
     parser.add_argument('--SELECT_FEATURE_THRE', dest='SELECT_FEATURE_THRE', type=int, default=200, help='when automatically decide subsample rate, this will decide the trace budget')
     parser.add_argument('--temporal_discrim_only', dest='temporal_discrim_only', action='store_true', help='if set, do not use single frame discriminator')
     parser.add_argument('--n_boids', dest='n_boids', type=int, default=40, help='number of boids in boids app')
-    parser.add_argument('--log_getitem', dest='log_getitem', action='store_true', help='if true, do not log getitem node in DSL')
+    parser.add_argument('--no_log_getitem', dest='log_getitem', action='store_false', help='if true, do not log getitem node in DSL')
+    parser.add_argument('--niters', dest='niters', type=int, default=200, help='in examples e.g. boids, we will enumerate the entire training data, but rather, we would randomly sample from training dataset during each epoch, niters shows how many samples / steps trained per epoch')
     
     parser.set_defaults(is_train=False)
     parser.set_defaults(use_batch=False)
@@ -1455,7 +1458,7 @@ def main():
     parser.set_defaults(log_only_return_def_raymarching=True)
     parser.set_defaults(train_temporal_seq=False)
     parser.set_defaults(temporal_discrim_only=False)
-    parser.set_defaults(log_getitem=False)
+    parser.set_defaults(log_getitem=True)
 
     args = parser.parse_args()
 
@@ -1627,13 +1630,14 @@ def main_network(args):
         ntiles_h = 1
 
     if args.use_dataroot:
-        input_names, output_names, val_names, val_img_names, map_names, val_map_names, grad_names, val_grad_names, add_names, val_add_names = prepare_data_root(args.dataroot, additional_input=args.additional_input)
-        if args.test_training:
-            val_names = input_names
-            val_img_names = output_names
-            val_map_names = map_names
-            val_grad_names = grad_names
-            val_add_names = add_names
+        if not args.shader_name.startswith('boids'):
+            input_names, output_names, val_names, val_img_names, map_names, val_map_names, grad_names, val_grad_names, add_names, val_add_names = prepare_data_root(args.dataroot, additional_input=args.additional_input)
+            if args.test_training:
+                val_names = input_names
+                val_img_names = output_names
+                val_map_names = map_names
+                val_grad_names = grad_names
+                val_add_names = add_names
     else:
         args.write_summary = False
 
@@ -1669,21 +1673,24 @@ def main_network(args):
             args.use_queue = False
         
     if args.use_dataroot:
-        if args.is_train or args.test_training:
-            camera_pos_vals = np.load(os.path.join(args.dataroot, 'train.npy'))
-            time_vals = np.load(os.path.join(args.dataroot, 'train_time.npy'))
-            if args.tile_only:
-                tile_start_vals = np.load(os.path.join(args.dataroot, 'train_start.npy'))
-        else:
-            if not args.temporal_texture_buffer:
-                camera_pos_vals = np.concatenate((
-                                    np.load(os.path.join(args.dataroot, 'test_close.npy')),
-                                    np.load(os.path.join(args.dataroot, 'test_far.npy')),
-                                    np.load(os.path.join(args.dataroot, 'test_middle.npy'))
-                                    ), axis=0)
+        if not args.shader_name.startswith('boids'):
+            if args.is_train or args.test_training:
+                camera_pos_vals = np.load(os.path.join(args.dataroot, 'train.npy'))
+                time_vals = np.load(os.path.join(args.dataroot, 'train_time.npy'))
+                if args.tile_only:
+                    tile_start_vals = np.load(os.path.join(args.dataroot, 'train_start.npy'))
             else:
-                camera_pos_vals = np.load(os.path.join(args.dataroot, 'test.npy'))
-            time_vals = np.load(os.path.join(args.dataroot, 'test_time.npy'))
+                if not args.temporal_texture_buffer:
+                    camera_pos_vals = np.concatenate((
+                                        np.load(os.path.join(args.dataroot, 'test_close.npy')),
+                                        np.load(os.path.join(args.dataroot, 'test_far.npy')),
+                                        np.load(os.path.join(args.dataroot, 'test_middle.npy'))
+                                        ), axis=0)
+                else:
+                    camera_pos_vals = np.load(os.path.join(args.dataroot, 'test.npy'))
+                time_vals = np.load(os.path.join(args.dataroot, 'test_time.npy'))
+        else:
+            camera_pos_vals = np.load(os.path.join(args.dataroot, 'train_ground.npy'))
     else:
         if len(args.camera_pos_file):
             camera_pos_vals = np.load(args.camera_pos_file)[:args.camera_pos_len]
@@ -1693,12 +1700,19 @@ def main_network(args):
         
     current_ind = tf.constant(0)
     
-    nexamples = time_vals.shape[0]
+    if not args.shader_name.startswith('boids'):
+        nexamples = time_vals.shape[0]
+    else:
+        nexamples = args.niters
     texture_maps = []
     if not args.use_queue:
-        output_pl = tf.placeholder(tf.float32, shape=[None, output_pl_h, output_pl_w, output_nc])
+        
         if args.shader_name.startswith('boids'):
             texture_maps = tf.placeholder(dtype, (args.n_boids, 4))
+            output_pl = tf.placeholder(tf.float32, shape=[None, args.n_boids, 4])
+        else:
+            output_pl = tf.placeholder(tf.float32, shape=[None, output_pl_h, output_pl_w, output_nc])
+        
         if args.texture_maps != '':
             combined_texture_maps = np.load(args.texture_maps)
             if not args.temporal_texture_buffer:
@@ -1878,10 +1892,12 @@ def main_network(args):
         
 
     if not args.use_queue:
-        if args.geometry != 'texture_approximate_10f':
-            camera_pos = tf.placeholder(dtype, shape=[6, args.batch_size])
-        else:
-            camera_pos = tf.placeholder(dtype, shape=[33, args.batch_size])
+        camera_pos = None
+        if not args.shader_name.startswith('boids'):
+            if args.geometry != 'texture_approximate_10f':
+                camera_pos = tf.placeholder(dtype, shape=[6, args.batch_size])
+            else:
+                camera_pos = tf.placeholder(dtype, shape=[33, args.batch_size])
         shader_time = tf.placeholder(dtype, shape=args.batch_size)
     if args.additional_input:
         additional_input_pl = tf.placeholder(dtype, shape=[None, output_pl_h, output_pl_w, 1])
