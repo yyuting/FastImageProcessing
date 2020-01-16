@@ -137,10 +137,8 @@ def tf_np_wrapper(func):
             return tf.random_normal(tf.shape(x), dtype=x.dtype)
         elif func == 'nequal':
             return tf.math.logical_not(tf.equal(x, y))
-            #return 0.0
-        #elif func == 'sqrt':
-            #ans = tf.sqrt(x)
-            #return tf.where(tf.is_nan(ans), tf.zeros_like(ans), ans)
+        elif func == 'expand_1D':
+            return tf.expand_dims(x, 1)
 
         if isinstance(x, tf.Tensor) or isinstance(y, tf.Tensor):
             if func == 'fmod':
