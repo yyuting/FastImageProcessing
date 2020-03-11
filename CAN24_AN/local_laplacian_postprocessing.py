@@ -16,6 +16,7 @@ def main():
     output = local_laplacian_tf(tf.expand_dims(input, axis=0), J=7)
     sess = tf.Session()
     files = os.listdir(dir)
+    target_dir = sys.argv[2]
     for file in files:
         if file.endswith('.png') and ('local_laplacian' not in file):
             in_img = skimage.img_as_float(skimage.io.imread(os.path.join(dir, file)))
@@ -33,7 +34,7 @@ def main():
                 in_img = in_img[:, :new_res, :]
             out_img = sess.run(output, feed_dict={input: in_img})
             out_img = numpy.clip(numpy.squeeze(out_img), 0.0, 1.0)
-            skimage.io.imsave(os.path.join(dir, 'local_laplacian_' + file), out_img)
+            skimage.io.imsave(os.path.join(target_dir, 'local_laplacian_' + file), out_img)
 
 if __name__ == '__main__':
     main()

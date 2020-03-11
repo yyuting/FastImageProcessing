@@ -7,18 +7,24 @@ import numpy as np
 import colorsys
 import skimage
 import skimage.io
+import shutil
+import sys
+from matplotlib.patches import BoxStyle
 
 hue_shaders = {
-    'bricks': 0.1,
-    'mandelbrot': 0.2,
-    'mandelbulb': 0.3,
-    'marble': 0.4,
-    'oceanic': 0.5,
-    'primitives': 0.6,
-    'trippy': 0.7,
-    'venice': 0.8,
-    'boids': 0.9
+    'bricks': [0.1,1,1],
+    'mandelbrot': [0.2, 1, 1],
+    'mandelbulb': [0.3, 1, 1],
+    'marble': [0.0, 0.6, 1],
+    'oceanic': [0.5, 1, 1],
+    'primitives': [0.6, 0.9, 1],
+    'trippy': [0.8, 0.9, 1],
+    'venice': [0.9, 0.8, 1],
+    'boids': [0.7, 0.8, 1]
 }
+
+teaser_app = 'simplified'
+teaser_shader = 'venice'
 
 app_shader_dir_200 = {
 'denoising': {
@@ -28,15 +34,25 @@ app_shader_dir_200 = {
                'img_idx': 6,
                'img_zoom_bbox': [240, 320, -190, -130],
                'gt_dir': '/n/fs/shaderml/datas_bricks_dsf/test_img',
-               'msaa_sample': 1
+               'msaa_sample': 1,
+               'print': 'Bricks'
               },
-    'marble': {'dir': ['1x_1sample_marble_automatic_200/test/',
+    #'marble': {'dir': ['1x_1sample_marble_automatic_200/test/',
+    #                   '1x_1sample_marble_automatic_200_aux/test/',
+    #                   '1x_1sample_marble_automatic_200/mean1_test/'],
+    #           'img_idx': 25,
+    #           'img_zoom_bbox': [220, 220+80, 3, 3+60],
+    #           'gt_dir': '/n/fs/shaderml/datas_marble_automatic_200/test_img',
+    #           'msaa_sample': 1
+    #          },
+    'marble2': {'dir': ['1x_1sample_marble_automatic_200/test/',
                        '1x_1sample_marble_automatic_200_aux/test/',
                        '1x_1sample_marble_automatic_200/mean1_test/'],
-               'img_idx': 25,
-               'img_zoom_bbox': [220, 220+80, 3, 3+60],
+               'img_idx': 6,
+               'img_zoom_bbox': [500, 500+80, 760, 760+60],
                'gt_dir': '/n/fs/shaderml/datas_marble_automatic_200/test_img',
-               'msaa_sample': 1
+               'msaa_sample': 1,
+               'print': 'Marble'
               },
     'mandelbrot': {'dir': ['1x_1sample_mandelbrot_tile_automatic_200_repeat/test/',
                            '1x_1sample_mandelbrot_tile_automatic_200_aux_repeat/test/',
@@ -44,23 +60,42 @@ app_shader_dir_200 = {
                    'img_idx': 8,
                    'img_zoom_bbox': [550, 550+80, 500, 500+60],
                    'gt_dir': '/n/fs/shaderml/datas_mandelbrot_tile_automatic_200/test_img',
-                   'msaa_sample': 3
+                   'msaa_sample': 3,
+                   'print': 'Mandelbrot'
                   },
     'mandelbulb': {'dir': ['1x_1sample_mandelbulb_automatic_200/test/',
                            '1x_1sample_mandelbulb_automatic_200_aux/test/',
                            '1x_1sample_mandelbulb_automatic_200/mean3_test/'],
                    'img_idx': 7,
                    'img_zoom_bbox': [370, 370+80, 370, 370+60],
+                   'crop_box': [200, 640, 70, -230],
                    'gt_dir': '/n/fs/shaderml/datas_mandelbulb_automatic_200/test_img',
-                   'msaa_sample': 3
+                   'msaa_sample': 3,
+                   'print': 'Mandelbulb'
                   },
+    #'mandelbulb2': {'dir': ['1x_1sample_mandelbulb_automatic_200/test/',
+    #                       '1x_1sample_mandelbulb_automatic_200_aux/test/',
+    #                       '1x_1sample_mandelbulb_automatic_200/mean3_test/'],
+                   #'img_idx': 7,
+                   #'img_zoom_bbox': [370, 370+80, 370, 370+60],
+    #               'other_view': ['home/global_opt/proj/apps/out/mandelbulb_none_normal_none/video_gt00000.png',
+    #                              '1x_1sample_mandelbulb_automatic_200/render_ours/000001.png',
+    #                              '1x_1sample_mandelbulb_automatic_200_aux/render/000001.png',
+    #                              '1x_1sample_mandelbulb_automatic_200/render_mean3/000001.png'
+    #               ],
+    #               'img_zoom_bbox': [180, 180+80, 500, 500+60],
+    #               'gt_dir': '/n/fs/shaderml/datas_mandelbulb_automatic_200/test_img',
+    #               'msaa_sample': 3
+    #              },
     'primitives': {'dir': ['1x_1sample_primitives_wheel_only_automatic_200/test/',
                            '1x_1sample_primitives_wheel_only_automatic_200_aux/test/',
                            '1x_1sample_primitives_wheel_only_automatic_200/mean1_test/'],
                    'img_idx': 1,
                    'img_zoom_bbox': [270, 270+80, 370, 370+60],
                    'gt_dir': '/n/fs/shaderml/datas_primitives_wheel_only_automatic_200/test_img',
-                   'msaa_sample': 1
+                   'msaa_sample': 1,
+                   'crop_box': [80, -180, 115, -275],
+                   'print': 'Gear'
                   },
     'trippy': {'dir': ['1x_1sample_trippy_heart_tile_automatic_dfs_200/test/',
                '1x_1sample_trippy_heart_tile_automatic_dfs_200_aux/test/',
@@ -68,7 +103,8 @@ app_shader_dir_200 = {
                'img_idx': 11,
                'img_zoom_bbox': [550, 550+80, 65, 65+60],
                'gt_dir': '/n/fs/shaderml/datas_trippy_heart_tile_rotation_automatic_200/test_img',
-               'msaa_sample': 4
+               'msaa_sample': 4,
+               'print': 'Trippy Heart'
               },
     'oceanic': {'dir': ['1x_1sample_oceanic_all_raymarching_automatic_200/test/',
                 '1x_1sample_oceanic_all_raymarching_automatic_200_aux/test/',
@@ -78,7 +114,8 @@ app_shader_dir_200 = {
                 'img_idx': 17,
                 'img_zoom_bbox': [280, 280+80, 750, 750+60],
                 'gt_dir': '/n/fs/shaderml/datas_oceanic_all_raymarching_automatic_200/test_img',
-                'msaa_sample': 1
+                'msaa_sample': 1,
+                'print': 'Oceanic'
                },
     'venice': {'dir': ['1x_1sample_venice_full_automatic_200/test/',
                '1x_1sample_venice_full_proxy_automatic_400_with_initial_aux/test/',
@@ -86,7 +123,8 @@ app_shader_dir_200 = {
                'img_idx': 3,
                'img_zoom_bbox': [150, 150+80, 150, 150+60],
                'gt_dir': '/n/fs/shaderml/datas_venice_100spp_focus_far_simplified_automatic_400/test_img',
-               'msaa_sample': 1
+               'msaa_sample': 1,
+               'print': 'Venice'
               }
     },
 'simplified': {
@@ -94,13 +132,15 @@ app_shader_dir_200 = {
                '1x_1sample_bricks_simplified_proxy_aux/test/',
                '1x_1sample_bricks_simplified_proxy/mean1_test'],
                'img_idx': 6,
-               'gt_dir': '/n/fs/shaderml/datas_bricks_dsf/test_img'
+               'gt_dir': '/n/fs/shaderml/datas_bricks_dsf/test_img',
+               'print': 'Bricks'
               },
     'mandelbrot': {'dir': ['1x_1sample_mandelbrot_simplified_proxy_all_trace_patchGAN_scale_005_update_8_long/test_zero_samples/test/',
                    '1x_1sample_mandelbrot_simplified_proxy_all_trace_patchGAN_scale_005_update_8_long_aux/test/',
                    '1x_1sample_mandelbrot_simplified_proxy_all_trace_patchGAN_scale_005_update_8_long/mean1_test/'],
                    'img_idx': 8,
-                   'gt_dir': '/n/fs/shaderml/datas_mandelbrot_simplified_proxy/test_img'
+                   'gt_dir': '/n/fs/shaderml/datas_mandelbrot_simplified_proxy/test_img',
+                   'print': 'Mandelbrot'
                   },
     'mandelbulb': {'dir': ['1x_1sample_mandelbulb_simplified_automatic_200/test/',
                    '1x_1sample_mandelbulb_simplified_automatic_200_aux/test/',
@@ -108,49 +148,71 @@ app_shader_dir_200 = {
                    'other_view': ['mandelbulb_video_gt_f1.png',
                                   '1x_1sample_mandelbulb_simplified_automatic_200/render_ours/000001.png',
                                   '1x_1sample_mandelbulb_simplified_automatic_200_aux/render/000001.png',
-                                  '1x_1sample_mandelbulb_simplified_automatic_200/render_mean1/000001.png']
+                                  '1x_1sample_mandelbulb_simplified_automatic_200/render_mean1/000001.png'],
+                   'print': 'Mandelbulb'
                   },
     'trippy': {'dir': ['1x_1sample_trippy_heart_simplified_proxy_dfs_automatic_200/test/',
                '1x_1sample_trippy_heart_simplified_proxy_dfs_automatic_200_aux/test/',
                '1x_1sample_trippy_heart_simplified_proxy_dfs_automatic_200/mean1_test'],
                'img_idx': 11,
-               'gt_dir': '/n/fs/shaderml/datas_trippy_heart_simplified_proxy_dfs_automatic_200/test_img'
+               'gt_dir': '/n/fs/shaderml/datas_trippy_heart_simplified_proxy_dfs_automatic_200/test_img',
+               'print': 'Trippy Heart'
               },
     'venice': {'dir': ['1x_1sample_venice_100spp_simplified_30_70_automatic_200/test/',
                        '1x_1sample_venice_100spp_simplified_30_70_aux/test/',
                        '1x_1sample_venice_100spp_simplified_30_70_automatic_200/mean1_test/'],
-               'img_idx': 25,
-               'gt_dir': '/n/fs/shaderml/datas_venice_100spp_simplified_30_70_automatic_200/test_img'
+               #'img_idx': 25,
+               'img_zoom_bbox': [120, 120+120, 100, 100+80],
+               'gt_dir': '/n/fs/shaderml/datas_venice_100spp_simplified_30_70_automatic_200/test_img',
+               'other_view': ['home/global_opt/proj/apps/out/venice_none_normal_none/teaser00000.png',
+                              'scratch/1x_1sample_venice_100spp_simplified_30_70_automatic_200/test/000001.png',
+                              'scratch/1x_1sample_venice_100spp_simplified_30_70_aux/test/000001.png',
+                              'scratch/1x_1sample_venice_100spp_simplified_30_70_automatic_200/mean1_test/000001.png'],
+               'input_time_frag': 0.57,
+               'print': 'Venice'
               }
     },
 'temporal': {
     'mandelbrot_simplified': {'dir': ['1x_1sample_mandelbrot_simplified_proxy_temporal/test',
-                              '1x_1sample_mandelbrot_simplified_proxy_temporal_aux/test'],
+                              '1x_1sample_mandelbrot_simplified_proxy_temporal_aux/test',
+                                     '1x_1sample_mandelbrot_simplified_proxy_all_trace_patchGAN_scale_005_update_8_long/mean1_test/'],
                               'other_view': ['mandelbrot_simplified_temporal_gt_gamma_corrected.png',
                                              '1x_1sample_mandelbrot_simplified_proxy_temporal/test_gamma_corrected/00000827.png',
                                              '1x_1sample_mandelbrot_simplified_proxy_temporal_aux/test_gamma_corrected/00000827.png',
-                                             'mandelbrot_simplified_temporal_input_gamma_corrected.png']
+                                             'mandelbrot_simplified_temporal_input_gamma_corrected.png'],
+                              'print': 'Simplified Mandelbrot'
                              },
     'mandelbrot': {'dir': ['1x_1sample_mandelbrot_full_temporal_automatic_200_correct_alpha/test',
-                   '1x_1sample_mandelbrot_full_temporal_correct_alpha_aux/test'],
-                   'other_view': ['mandelbrot_full_temporal_gt_gamma_corrected.png',
-                                  '1x_1sample_mandelbrot_full_temporal_automatic_200_correct_alpha/test_gamma_corrected/00000727.png',
-                                  '1x_1sample_mandelbrot_full_temporal_correct_alpha_aux/test_gamma_corrected/00000727.png',
-                                  'mandelbrot_full_temporal_input_gamma_corrected.png']
+                   '1x_1sample_mandelbrot_full_temporal_correct_alpha_aux/test',
+                          '1x_1sample_mandelbrot_tile_automatic_200_repeat/mean1_test'],
+                   #'other_view': ['mandelbrot_full_temporal_gt_gamma_corrected.png',
+                   #               '1x_1sample_mandelbrot_full_temporal_automatic_200_correct_alpha/test_gamma_corrected/00000727.png',
+                   #               '1x_1sample_mandelbrot_full_temporal_correct_alpha_aux/test_gamma_corrected/00000727.png',
+                   #               'mandelbrot_full_temporal_input_gamma_corrected.png'],
+                   'other_view': ['home/global_opt/proj/apps/out/mandelbrot_tile_radius_plane_normal_none/video_gt_gamma_corrected/video_gt00119.png',
+                       '1x_1sample_mandelbrot_full_temporal_automatic_200_correct_alpha/render_gamma_corrected/000120.png',
+                                  '1x_1sample_mandelbrot_full_temporal_correct_alpha_aux/render_gamma_corrected/000120.png',
+                                  'mandelbrot_temporal_inpug_gamma_corrected.png'
+                   ],
+                   'print': 'Mandelbrot'
                   },
     'mandelbulb_simplified': {'dir': ['1x_1sample_mandelbulb_simplified_temporal_corrected_alpha/test',
-                              '1x_1sample_mandelbulb_simplified_temporal_corrected_alpha_aux/test'],
+                              '1x_1sample_mandelbulb_simplified_temporal_corrected_alpha_aux/test',
+                                     '1x_1sample_mandelbulb_simplified_automatic_200/mean1_test/'],
                               'other_view': ['mandelbulb_simplified_temporal_gt.png',
                                              '1x_1sample_mandelbulb_simplified_temporal_corrected/render/000030.png',
                                              '1x_1sample_mandelbulb_simplified_temporal_corrected_aux/render/000030.png',
-                                             'mandelbulb_simplified_temporal_input.png']
+                                             'mandelbulb_simplified_temporal_input.png'],
+                              'print': 'Simplified Mandelbulb'
                              },
     'mandelbulb': {'dir': ['1x_1sample_mandelbulb_full_temporal_larger_cap_correct_alpha/test',
-                   '1x_1sample_mandelbulb_full_temporal_larger_cap_correct_alpha_aux/test'],
+                   '1x_1sample_mandelbulb_full_temporal_larger_cap_correct_alpha_aux/test',
+                          '1x_1sample_mandelbulb_automatic_200/mean1_test/'],
                    'other_view': ['/n/fs/shaderml/datas_mandelbulb_full_temporal/test_img/test_ground2900007.png',
                                   '1x_1sample_mandelbulb_full_temporal_larger_cap_correct_alpha/test/00000827.png',
                                   '1x_1sample_mandelbulb_full_temporal_larger_cap_correct_alpha_aux/test/00000827.png',
-                                  'mandelbulb_full_temporal_input.png']
+                                  'mandelbulb_full_temporal_input.png'],
+                   'print': 'Mandelbulb'
                   },
     'trippy_simplified': {'dir': ['1x_1sample_trippy_simplified_temporal_corrected_alpha/test',
                                   '1x_1sample_trippy_simplified_temporal_corrected_alpha_aux/test',
@@ -158,16 +220,33 @@ app_shader_dir_200 = {
                           'other_view': ['/n/fs/shaderml/datas_trippy_temporal/test_img/test_ground2900010.png',
                                          '1x_1sample_trippy_simplified_temporal_corrected_alpha/test/00001127.png',
                                          '1x_1sample_trippy_simplified_temporal_corrected_alpha_aux/test/00001127.png',
-                                         'trippy_simplified_temporal_input.png']
+                                         'trippy_simplified_temporal_input.png'],
+                          'print': 'Simplified Trippy Heart'
                          }
     },
 'post_processing': {
     'mandelbulb_blur': {'dir': ['1x_1sample_mandelbulb_defocus_blur_automatic_200/test',
-                                '1x_1sample_mandelbulb_defocus_blur_automatic_200_aux/test']},
+                                '1x_1sample_mandelbulb_defocus_blur_automatic_200_aux/test'],
+                        'img_idx': 7,
+                        'img_zoom_bbox': [370, 370+80, 370, 370+60],
+                        'gt_dir': '/n/fs/shaderml/datas_mandelbulb_defocus_blur_automatic_200/test_img',
+                        'crop_box': [200, 640, 132, -292],
+                        'print': 'Mandelbulb Blur'
+                       },
     'trippy_sharpen': {'dir': ['1x_1sample_trippy_heart_local_laplacian_random_rotation_automatic_200/test',
-                          '1x_1sample_trippy_heart_local_laplacian_random_rotation_automatic_200_aux/test']},
+                          '1x_1sample_trippy_heart_local_laplacian_random_rotation_automatic_200_aux/test'],
+                       'img_idx': 11,
+                       'img_zoom_bbox': [180, 180+80, 570, 570+60],
+                       'gt_dir': '/n/fs/shaderml/datas_trippy_local_laplacian_automatic_200/test_img',
+                       'print': 'Trippy Heart Sharpen'
+                      },
     'trippy_simplified_sharpen': {'dir': ['1x_1sample_trippy_simplified_local_laplacian_rotation_dataset_automatic_200_update_8/test',
-                                     '1x_1sample_trippy_simplified_local_laplacian_rotation_dataset_automatic_200_update_8_aux/test']}
+                                     '1x_1sample_trippy_simplified_local_laplacian_rotation_dataset_automatic_200_update_8_aux/test'],
+                                  'img_idx': 11,
+                                  'img_zoom_bbox': [310, 310+80, 180, 180+60],
+                                  'gt_dir': '/n/fs/shaderml/datas_trippy_local_laplacian_automatic_200/test_img',
+                                  'print': 'Simplified Trippy Heart Sharpen'
+                                 }
     },
 'simulation': {
     'boids': {'dir': ['/n/fs/visualai-scr/yutingy/boids_res_20_64_validate_switch_label/test',
@@ -177,13 +256,17 @@ app_shader_dir_200 = {
 
 app_names = ['denoising',
              'simplified',
-             'temporal',
              'post_processing',
+             'temporal',
              'simulation']
 
 max_shader_per_fig = 5
 
 def main():
+    if len(sys.argv) > 1:
+        mode = sys.argv[1]
+    else:
+        mode = 'all'
     
     # barplot summary over all apps
     
@@ -223,10 +306,11 @@ def main():
             for name in hue_shaders.keys():
                 if shader_name.startswith(name):
                     current_hue = hue_shaders[name]
+                    current_col = colorsys.hsv_to_rgb(*hue_shaders[name])
                     bar_x_ticks.append(name)
                     break
 
-            current_col = colorsys.hsv_to_rgb(current_hue, 1, 1)
+            #current_col = colorsys.hsv_to_rgb(current_hue, 1, 1)
             bar_col.append(current_col)
 
             if app_name == 'post_processing':
@@ -242,7 +326,7 @@ def main():
                 assert neval == 3
             else:
                 assert neval >= 2
-                neval = 2
+                #neval = 2
 
             score = -np.ones((neval, 3))
             l2_score = -np.ones((neval, 3))
@@ -318,342 +402,638 @@ def main():
         bar_col.append((0, 0, 0))
         bar_edge_width.append(0)
 
-    bar_x = np.arange(len(bar_x_ticks))
-    fig = plt.figure()
-    fig.set_size_inches(9, 4)
-
-    #ax = plt.subplot(111)
-    #ax.set_aspect(1.0)
-    plt.bar(bar_x[full_shader_idx], [bar_avg[i] for i in full_shader_idx], color=[bar_col[i] for i in full_shader_idx], edgecolor='k', linestyle='-')
-    plt.bar(bar_x[simplified_shader_idx], [bar_avg[i] for i in simplified_shader_idx], color=[bar_col[i] for i in simplified_shader_idx], edgecolor='k', linestyle='--')
-    plt.xticks(bar_x, bar_x_ticks, rotation=90)
-
-    plt.text(2.5, 1.05, 'denoising')
-    plt.text(10, 1.05, 'simplified')
-    plt.text(16, 1.05, 'temporal')
-    plt.text(21.5, 1.05, 'post')
-    plt.text(24.6, 1.05, 'sim')
-
-
-    #plt.text(0, 0.9, 'baseline', withdash=True, color='b')
-
-    for k in range(len(app_names)):
-        plt.axvspan(slice_start[k], slice_end[k], facecolor=colorsys.hsv_to_rgb(0.0, k / len(app_names), k / len(app_names)), alpha=0.3)
-
-    plt.xlim(slice_start[0], slice_end[-1])
-
-    plt.plot(np.arange(-1, len(bar_x_ticks)+1), np.ones(len(bar_x_ticks)+2), 'k-', label='full shader')
-    plt.plot(np.arange(-1, len(bar_x_ticks)+1), np.ones(len(bar_x_ticks)+2), 'k--', label='simplified shader')
-
-    plt.plot(np.arange(-1, len(bar_x_ticks)+1), np.ones(len(bar_x_ticks)+2), label='baseline')
-
-    plt.legend(loc=0)
-
-    plt.ylim(0, 1.15)
-    plt.ylabel('relative error')
-
-    plt.tight_layout()
-    plt.savefig('result_figs/bar_summary.png')
-    plt.close(fig)
-    
-    
-    # table
-    
-    str = ""
-    
-    for k in range(len(app_names)):
+    if 'bar' in mode or mode == 'all':
         
-        app_name = app_names[k]
+        fontsize = 14
         
-        if app_name in ['simulation']:
-            continue
+        bar_x = np.arange(len(bar_x_ticks))
+        fig = plt.figure()
+        fig.set_size_inches(9, 4.5)
 
-        str += """
-\\vspace{-1ex}
-\setlength{\\tabcolsep}{2.0pt}
-\\begin{table}[]
-\\begin{tabular}{c|ccccc}
-\\hline
+        ax = plt.subplot(111)
+        #ax.set_aspect(1.0)
+        plt.bar(bar_x[full_shader_idx], [bar_avg[i] for i in full_shader_idx], color=[bar_col[i] for i in full_shader_idx], edgecolor='k', linestyle='-')
+        plt.bar(bar_x[simplified_shader_idx], [bar_avg[i] for i in simplified_shader_idx], color=[bar_col[i] for i in simplified_shader_idx], edgecolor='k', linestyle='--')
+        plt.xticks(bar_x, bar_x_ticks, rotation=90, fontsize=fontsize)
+        
+        for label in (ax.get_xticklabels() + ax.get_yticklabels()):
+            label.set_fontsize(fontsize)
+        
 
-    \multirow{2}{*}{Shader} &  & \multicolumn{2}{c}{Perceptual} & \multicolumn{2}{c}{L2 Error} \\\\ \cline{3-6} 
-    & Distances: & Similar & Different & Similar & Different \\\\ \\thickhline
-"""
+        plt.text(2.5, 1.05, 'denoising', fontsize=fontsize)
+        plt.text(10.5, 1.05, 'simplified', fontsize=fontsize)
+        plt.text(16.7, 1.05, 'temporal', fontsize=fontsize)
+        plt.text(22.3, 1.05, 'post', fontsize=fontsize)
+        plt.text(25.2, 1.05, 'sim', fontsize=fontsize)
 
-        for shader_name in sorted(app_shader_dir_200[app_name].keys()):
-            data = app_shader_dir_200[app_name][shader_name]
 
+        #plt.text(0, 0.9, 'baseline', withdash=True, color='b')
+
+        for k in range(len(app_names)):
+            #col = colorsys.hsv_to_rgb(0.0, k / len(app_names), k / len(app_names))
+            col = [0, 0, 0]
+            plt.axvspan(slice_start[k], slice_end[k], facecolor=col, alpha=0.3)
             
-            argmin_perceptual = np.argmin(data['perceptual'], 0)
-            argmin_l2 = np.argmin(data['l2'], 0)
-            if app_name == 'denoising':
-                row_data_rel = [1, 0, 2]
-            else:
-                row_data_rel = [1, 0]
-            count = 0
+        plt.xlim(slice_start[0], slice_end[-1])
+
+        plt.plot(np.arange(-1, len(bar_x_ticks)+1), np.ones(len(bar_x_ticks)+2), 'k-', label='full shader')
+        plt.plot(np.arange(-1, len(bar_x_ticks)+1), np.ones(len(bar_x_ticks)+2), 'k--', label='simplified shader')
+
+        plt.plot(np.arange(-1, len(bar_x_ticks)+1), np.ones(len(bar_x_ticks)+2), label='baseline')
+
+        plt.legend(loc='upper right', prop={'size': fontsize}, framealpha=0.9, bbox_to_anchor=(0.8, 0.5))
+
+        plt.ylim(0, 1.15)
+        plt.ylabel('relative error', fontsize=fontsize)
+
+        plt.tight_layout()
+        plt.savefig('result_figs/bar_summary.png')
+        plt.close(fig)
+        
+        
+        
+        
+        
+        permutation = [0, 1, 15, 2, 17, 3, 4, 5, 6, 7, 8, 9, 10, 16, 11, 18, 12, 19, 13, 14, 20, 21, 22, 23, 24, 25, 26]
+        #bar_x_ticks = [bar_x_ticks[i] for i in permutation]
+        #bar_avg = [bar_avg[i] for i in permutation]
+        #bar_col = [bar_col[i] for i in permutation]
+        #bar_edge_width = [bar_edge_width[i] for i in permutation]
+        
+        #bar_x = bar_x[permutation]
+        bar_x = np.array([0, 1, 3, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 19, 2, 13, 4, 15, 17, 19, 20, 21, 22, 23, 24, 25])
+        fig = plt.figure()
+        fig.set_size_inches(9, 4.5)
+        
+        full_shader_idx = [0, 1, 2, 3, 4, 5, 6, 7, 21, 22, 25]
+        simpliifed_shader_idx = [9, 10, 11, 12, 13, 23]
+        full_temporal_idx = [15, 17]
+        simplified_temporal_idx = [16, 18, 19]
+
+        ax = plt.subplot(111)
+        #ax.set_aspect(1.0)
+        plt.bar(bar_x[full_shader_idx], [bar_avg[i] for i in full_shader_idx], color=[bar_col[i] for i in full_shader_idx], edgecolor='k', linestyle='-')
+        plt.bar(bar_x[simpliifed_shader_idx], [bar_avg[i] for i in simpliifed_shader_idx], color=[bar_col[i] for i in simpliifed_shader_idx], edgecolor='k', linestyle='-', hatch='\\\\')
+        plt.bar(bar_x[full_temporal_idx], [bar_avg[i] for i in full_temporal_idx], color=[bar_col[i] for i in full_temporal_idx], edgecolor='k', linestyle='-', hatch='//')
+        plt.bar(bar_x[simplified_temporal_idx], [bar_avg[i] for i in simplified_temporal_idx], color=[bar_col[i] for i in simplified_temporal_idx], edgecolor='k', linestyle='-', hatch='xx')
+        
+        #bar = ax.bar(bar_x[simplified_shader_idx], [bar_avg[i] for i in simplified_shader_idx], color=[bar_col[i] for i in simplified_shader_idx], edgecolor='k', linestyle='--', hatch='xx')
+        plt.xticks(bar_x, bar_x_ticks, rotation=90, fontsize=fontsize)
+        
+        invisible_full = matplotlib.patches.Patch(facecolor='#DCDCDC', label='full')
+        invisible_simplified = matplotlib.patches.Patch(facecolor='#DCDCDC', label='full', hatch='\\\\')
+        invisible_temporal = matplotlib.patches.Patch(facecolor='#DCDCDC', label='full', hatch='//')
+        
+        for label in (ax.get_xticklabels() + ax.get_yticklabels()):
+            label.set_fontsize(fontsize)
+        
+
+        plt.text(3.0, 1.07, 'denoising', fontsize=fontsize)
+        plt.text(13.5, 1.07, 'simplified', fontsize=fontsize)
+        plt.text(20.3, 1.07, 'post', fontsize=fontsize)
+        plt.text(23.4, 1.07, 'sim', fontsize=fontsize)
+        
+        
+
+        plt.axvspan(-0.5, 9.5, facecolor=[0, 0, 0], alpha=0.1)
+        plt.axvspan(10.5, 18.5, facecolor=[0, 0, 0], alpha=0.1)
+        plt.axvspan(19.5, 22.5, facecolor=[0, 0, 0], alpha=0.1)
+        plt.axvspan(23.5, 24.5, facecolor=[0, 0, 0], alpha=0.1)
             
-            data_strs = [None] * 4 * len(row_data_rel)
+        plt.xlim(-0.5, 24.5)
+
+        plt.plot(np.arange(-1, len(bar_x_ticks)+1), np.ones(len(bar_x_ticks)+2), 'k-', label='full shader')
+        plt.plot(np.arange(-1, len(bar_x_ticks)+1), np.ones(len(bar_x_ticks)+2), 'k--', label='simplified shader')
+
+        line, = plt.plot(np.arange(-1, len(bar_x_ticks)+1), np.ones(len(bar_x_ticks)+2), label='baseline')
+        
+        plt.text(8.7, 0.97, 'baseline', bbox=dict(facecolor='white', alpha=1, edgecolor=line.get_color(), linewidth=line.get_linewidth(), boxstyle=BoxStyle("Round", pad=0.5)), fontsize=fontsize, color=line.get_color())
+
+        plt.legend(loc='upper right', prop={'size': fontsize}, framealpha=0.9, bbox_to_anchor=(0.8, 0.5))
+        
+        ax.legend([invisible_full, invisible_simplified, invisible_temporal], ['full', 'simplified', 'temporal'], fontsize=fontsize, loc='upper right', framealpha=0.9, bbox_to_anchor=(1, 0.45))
+
+        plt.ylim(0, 1.19)
+        plt.ylabel('Relative Error', fontsize=fontsize)
+
+        plt.tight_layout()
+        plt.savefig('result_figs/bar_summary_v2.png')
+        plt.close(fig)
+    
+    
+    if 'table' in mode or mode == 'all':
+        # table
+
+        str = ""
+
+        for k in range(len(app_names)):
+
+            app_name = app_names[k]
             
-            for row in range(len(row_data_rel)):
-                for col in range(4):
-                    data_row = row_data_rel[row]
-                    if col < 2:
-                        field = 'perceptual'
-                        idx = col
-                        argmin_idx = argmin_perceptual[idx]
-                    else:
-                        field = 'l2'
-                        idx = col - 2
-                        argmin_idx = argmin_l2[idx]
+            if app_name in ['simulation']:
+                continue
 
-                    if row == 0:
-                        data_strs[count] = '%.1e' % data[field][1, idx]
-                    else:
-                        data_strs[count] = '%02d' % (data[field][data_row, idx] / data[field][1, idx] * 100)
-
-                    if data_row == argmin_idx:
-                        data_strs[count] = '\\textbf{' + data_strs[count] + '}'
-
-                    count += 1
-                    
-            print_name = shader_name
-            if print_name not in hue_shaders.keys():
-                print_name = print_name.replace('_', '\\\\', 1)
-                print_name = print_name.replace('_', '\\ ')
+            avg_ratio = np.empty([len(app_shader_dir_200[app_name].keys()), 2, 3])
                 
-
-            
-            if app_name == 'denoising':
-                str += """
-    \multicolumn{1}{c|}{\multirow{3}{*}{\\begin{tabular}[c]{@{}c@{}}\\%s\\\\ Fig1 \end{tabular}}} & RGBx & %s & %s & %s & %s \\\\ \cline{2-6} 
-    \multicolumn{1}{c|}{} & Ours & %s\%% & %s\%% & %s\%% & %s\%% \\\\ \cline{2-6}
-    \multicolumn{1}{c|}{} & MSAA & %s\%% & %s\%% & %s\%% & %s\%% \\\\ \\thickhline""" % ((print_name, ) + tuple(data_strs))
-            else:
-                str += """
-\multicolumn{1}{c|}{\multirow{2}{*}{\\begin{tabular}[c]{@{}c@{}}\\%s \end{tabular}}} & RGBx & %s & %s & %s & %s \\\\ \cline{2-6} 
-    \multicolumn{1}{c|}{} & Ours & %s\%% & %s\%% & %s\%% & %s\%% \\\\ \\thickhline""" % ((print_name, ) + tuple(data_strs))
-
-        str = str[:-11] + '\hline' + """
-\end{tabular}
-\caption{%s}
-\end{table}
-""" % app_name.replace('_', '\\ ')
-        
-    open('result_figs/supplemental.tex', 'w').write(str)
-    
-    
-    # result image for all apps
-    crop_edge_col = [12, 144, 36]
-    bbox_edge_w = 3
-    
-    str = ''
-    
-    no_zoom_defined = False
-    
-    for k in range(len(app_names)):
-        
-        app_name = app_names[k]
-        fig_start = True
-        fig_rows = 0
-        
-        if app_name == 'denoising':
-            
             str += """
-\\newcommand{\ResultsFigStartWithZoom}{
-\setlength{\\tabcolsep}{1pt}
-\setlength{\h}{1.15in}
-\\begin{tabular}{cccccc}
-}
+    \\vspace{-1ex}
+    \setlength{\\tabcolsep}{2.0pt}
+    \\begin{table}[]
+    \\begin{tabular}{c|ccccc}
+    \\hline
 
-\\newcommand{\ResultsFigEndWithZoom}[6]{
-\includegraphics[height=\h]{result_figs/#2_gt_box} & \includegraphics[height=\h]{result_figs/#2_ours_box} & \includegraphics[height=\h]{result_figs/#2_gt_zoom} & \includegraphics[height=\h]{result_figs/#2_ours_zoom} & \includegraphics[height=\h]{result_figs/#2_RGBx_zoom} & \includegraphics[height=\h]{result_figs/#2_MSAA_zoom} \\tablegap
-{\small {#1}} & & 
-{\small {#3}} & 
-{\small {#4}} & 
-{\small {#5}} & 
-{\small {#6}} 
-\end{tabular}
-}
+        \multirow{2}{*}{Shader} &  & \multicolumn{2}{c}{Perceptual} & \multicolumn{2}{c}{L2 Error} \\\\ \cline{3-6} 
+        & Distances: & Similar & Different & Similar & Different \\\\ \\thickhline
+    """
 
-\\newcommand{\ResultsFigWithHeaderWithZoom}[6]{
-\ResultsFigStartWithZoom
-(a) Reference & (b) Our result & (c) Reference & (d) Ours & (e) RGBx & (f) Supersample\\\\
-\\addlinespace[4pt]
-\ResultsFigEndWithZoom{#1}{#2}{#3}{#4}{#5}{#6}
-}
-
-\\newcommand{\ResultsFigNoHeaderWithZoom}[6]{
-\ResultsFigStartWithZoom
-\\addlinespace[4pt]
-\ResultsFigEndWithZoom{#1}{#2}{#3}{#4}{#5}{#6}
-}
-
-"""
-            
-        elif not no_zoom_defined:
-            no_zoom_defined = True
-            str += """
-\\newcommand{\ResultsFigStartWithoutZoom}{
-\setlength{\\tabcolsep}{1pt}
-\setlength{\h}{1.15in}
-\\begin{tabular}{cccc}
-}
-
-\\newcommand{\ResultsFigEndWithoutZoom}[4]{
-\includegraphics[height=\h]{result_figs/#2_gt} & \includegraphics[height=\h]{result_figs/#2_ours} & \includegraphics[height=\h]{result_figs/#2_RGBx} & \includegraphics[height=\h]{result_figs/#2_input} \\tablegap
-{\small {#1}} &
-{\small {#3}} & 
-{\small {#4}} & 
-\end{tabular}
-}
-
-\\newcommand{\ResultsFigWithHeaderWithoutZoom}[4]{
-\ResultsFigStartWithoutZoom
-(a) Reference & (b) Our result & (c) RGBx & (d) Input to Network \\\\
-\\addlinespace[4pt]
-\ResultsFigEndWithoutZoom{#1}{#2}{#3}{#4}
-}
-
-\\newcommand{\ResultsFigNoHeaderWithoutZoom}[4]{
-\ResultsFigStartWithoutZoom
-\\addlinespace[4pt]
-\ResultsFigEndWithoutZoom{#1}{#2}{#3}{#4}
-}
-
-"""
-        
-        app_data = app_shader_dir_200[app_name]
-        for shader_name in sorted(app_data.keys()):
-            data = app_data[shader_name]
-
-            
-            
-            if 'img_idx' in data.keys() or 'other_view' in data.keys():
+            #for shader_name in sorted(app_shader_dir_200[app_name].keys()):
+            for i in range(len(app_shader_dir_200[app_name].keys())):
                 
-                if 'img_idx' in data.keys():
-                    if shader_name == 'mandelbrot':
-                        for i in range(len(data['dir'])):
-                            if data['dir'][i].endswith('/'):
-                                data['dir'][i] = data['dir'][i][:-1]
-                            data['dir'][i] = data['dir'][i] + '_gamma_corrected'
-                        if data['gt_dir'].endswith('/'):
-                            data['gt_dir'] = data['gt_dir']
-                        data['gt_dir'] = data['gt_dir'] + '_gamma_corrected'
-
-                    orig_imgs = []
-                    for i in range(len(data['dir'])):
-                        if app_name == 'temporal':
-                            orig_imgs.append(skimage.io.imread(os.path.join(data['dir'][i], '%06d27.png' % data['img_idx'])))
-                        else:
-                            orig_imgs.append(skimage.io.imread(os.path.join(data['dir'][i], '%06d.png' % data['img_idx'])))
-                    if app_name == 'temporal':
-                        gt_img = skimage.io.imread(os.path.join(data['gt_dir'], '29%05d.png' % (data['img_idx']-1)))
-                    else:
-                        gt_files = sorted(os.listdir(data['gt_dir']))
-                        gt_img = skimage.io.imread(os.path.join(data['gt_dir'], gt_files[data['img_idx']-1]))
-
-                    orig_imgs = [gt_img] + orig_imgs
-                else:
-                    orig_imgs = []
-                    for i in range(len(data['other_view'])):
-                        orig_imgs.append(skimage.io.imread(data['other_view'][i]))
+                shader_name = sorted(app_shader_dir_200[app_name].keys())[i]
                 
+            
+                data = app_shader_dir_200[app_name][shader_name]
+                
+                avg_ratio[i, 0] = data['l2'][0] / data['l2'][1]
+                avg_ratio[i, 1] = data['perceptual'][0] / data['perceptual'][1]
 
-                for i in range(len(orig_imgs)):
-                    
-                    if i == 0:
-                        prefix = 'gt'
-                    elif i == 1:
-                        prefix = 'ours'
-                    elif i == 2:
-                        prefix = 'RGBx'
-                    elif i == 3:
-                        if app_name == 'denoising':
-                            prefix = 'MSAA'
-                        else:
-                            prefix = 'input'
-                    else:
-                        raise
-                    
-                    img = orig_imgs[i]
-                    
-                    if app_name in ['denoising', 'post_processing']:
-                        bbox = data['img_zoom_bbox']
-                        crop1 = img[bbox[0]:bbox[1], bbox[2]:bbox[3]]
-                        crop_w = 2
 
-                        for c in range(len(crop_edge_col)):
-                            crop1[:crop_w, :, c] = crop_edge_col[c]
-                            crop1[-crop_w:, :, c] = crop_edge_col[c]
-                            crop1[:, :crop_w, c] = crop_edge_col[c]
-                            crop1[:, -crop_w:, c] = crop_edge_col[c]
-
-                        skimage.io.imsave(os.path.join('result_figs', '%s_%s_%s_zoom.png' % (app_name, shader_name, prefix)), crop1)
-
-                        for i in range(len(bbox)):
-                            edge = bbox[i]
-                            for current_draw in range(edge-bbox_edge_w, edge+bbox_edge_w+1):
-                                for c in range(len(crop_edge_col)):
-                                    if i < 2:
-                                        img[current_draw, bbox[2]-bbox_edge_w:bbox[3]+bbox_edge_w, c] = crop_edge_col[c]
-                                    else:
-                                        img[bbox[0]-bbox_edge_w:bbox[1]+bbox_edge_w, current_draw, c] = crop_edge_col[c]
-
-                        skimage.io.imsave(os.path.join('result_figs', '%s_%s_%s_box.png' % (app_name, shader_name, prefix)), img)
-                    else:
-                        skimage.io.imsave(os.path.join('result_figs', '%s_%s_%s.png' % (app_name, shader_name, prefix)), img)
-                    
+                argmin_perceptual = np.argmin(data['perceptual'], 0)
+                argmin_l2 = np.argmin(data['l2'], 0)
                 if app_name == 'denoising':
-                    macro_suffix = 'WithZoom'
+                    row_data_rel = [1, 0, 2]
                 else:
-                    macro_suffix = 'WithoutZoom'
-                    
-                #if fig_start:
-                if fig_rows == 0 or fig_rows >= max_shader_per_fig:
-                    macro = '\ResultsFigWithHeader' + macro_suffix
-                    fig_start = False
-                    if fig_rows == 0:
-                        str += """
-\\begin{figure*}
-"""
-                    elif fig_rows >= max_shader_per_fig:
-                        fig_rows -= max_shader_per_fig
-                        str += """
-\\vspace{-2ex}
-\caption{%s}
-\end{figure*}
+                    row_data_rel = [1, 0]
+                count = 0
 
-\\begin{figure*}
-""" % app_name
-                else:
-                    macro = '\ResultsFigNoHeader' + macro_suffix
-                    
-                fig_rows += 1
-                
+                data_strs = [None] * 4 * len(row_data_rel)
+
+                for row in range(len(row_data_rel)):
+                    for col in range(4):
+                        data_row = row_data_rel[row]
+                        if col < 2:
+                            field = 'perceptual'
+                            idx = col
+                            argmin_idx = argmin_perceptual[idx]
+                        else:
+                            field = 'l2'
+                            idx = col - 2
+                            argmin_idx = argmin_l2[idx]
+
+                        if row == 0:
+                            data_strs[count] = '%.1e' % data[field][1, idx]
+                        else:
+                            data_strs[count] = '%02d' % (data[field][data_row, idx] / data[field][1, idx] * 100)
+
+                        if data_row == argmin_idx:
+                            data_strs[count] = '\\textbf{' + data_strs[count] + '}'
+
+                        count += 1
+
                 print_name = shader_name
-                if 'simplified' in shader_name:
-                    for name in hue_shaders.keys():
-                        if shader_name.startswith(name):
-                            print_name = name + '\\ simplified'
-                            break
-                
+                if print_name not in hue_shaders.keys():
+                    print_name = print_name.replace('_', '\\\\', 1)
+                    print_name = print_name.replace('_', '\\ ')
+
+
+
                 if app_name == 'denoising':
                     str += """
-%s{\%s}{%s_%s}{}{%.1e}{%.1e}{%d\,SPP, %.1e}
-""" % (macro, print_name, app_name, shader_name, data['perceptual'][0, 2], data['perceptual'][1, 2], data['msaa_sample'], data['perceptual'][2, 2])
+        \multicolumn{1}{c|}{\multirow{3}{*}{\\begin{tabular}[c]{@{}c@{}}\\%s \end{tabular}}} & RGBx & %s & %s & %s & %s \\\\ \cline{2-6} 
+        \multicolumn{1}{c|}{} & Ours & %s\%% & %s\%% & %s\%% & %s\%% \\\\ \cline{2-6}
+        \multicolumn{1}{c|}{} & MSAA & %s\%% & %s\%% & %s\%% & %s\%% \\\\ \\thickhline""" % ((print_name, ) + tuple(data_strs))
                 else:
                     str += """
-%s{\%s}{%s_%s}{%.1e}{%.1e}
-""" % (macro, print_name, app_name, shader_name, data['perceptual'][0, 2], data['perceptual'][1, 2])
-        
-        if not fig_start:
-            str += """
-\\vspace{-2ex}
-\caption{%s}
-\end{figure*}
-""" % app_name
-        
-    open('result_figs/result_pool.tex', 'w').write(str)
+    \multicolumn{1}{c|}{\multirow{2}{*}{\\begin{tabular}[c]{@{}c@{}}\\%s \end{tabular}}} & RGBx & %s & %s & %s & %s \\\\ \cline{2-6} 
+        \multicolumn{1}{c|}{} & Ours & %s\%% & %s\%% & %s\%% & %s\%% \\\\ \\thickhline""" % ((print_name, ) + tuple(data_strs))
 
+            
+            print('avg ratio for', app_name)
+            print(numpy.mean(avg_ratio, 0))
+            numpy.save('avg_ratio_%s'% app_name, avg_ratio)
+            
+            str = str[:-11] + '\hline' + """
+    \end{tabular}
+    \caption{%s}
+    \end{table}
+    """ % app_name.replace('_', '\\ ')
+
+        open('result_figs/supplemental.tex', 'w').write(str)
+    
+    
+    if 'fig' in mode or mode == 'all':
+        # result image for all apps
+        crop_edge_col = [12, 144, 36]
+        bbox_edge_w = 3
+        
+        post_processing_w = 780
+        post_processing_cropped = (960 - post_processing_w) // 2
+
+        str = ''
+
+        no_zoom_defined = False
+
+        for k in range(len(app_names)):
+            
+            app_name = app_names[k]
+            
+            if app_name in ['temporal', 'simulation']:
+                continue
+            
+            fig_start = True
+            fig_rows = 0
+
+
+            app_data = app_shader_dir_200[app_name]
+            for shader_name in sorted(app_data.keys()):
+
+                if app_name == teaser_app and shader_name == teaser_shader:
+                    # will generate a seperate teaser
+                    continue
+
+                data = app_data[shader_name]
+
+
+
+                if 'img_idx' in data.keys() or 'other_view' in data.keys():
+
+                    if 'img_idx' in data.keys():
+                        if shader_name == 'mandelbrot':
+                            for i in range(len(data['dir'])):
+                                if data['dir'][i].endswith('/'):
+                                    data['dir'][i] = data['dir'][i][:-1]
+                                data['dir'][i] = data['dir'][i] + '_gamma_corrected'
+                            if data['gt_dir'].endswith('/'):
+                                data['gt_dir'] = data['gt_dir']
+                            data['gt_dir'] = data['gt_dir'] + '_gamma_corrected'
+
+                        orig_imgs = []
+                        for i in range(len(data['dir'])):
+                            if app_name == 'temporal':
+                                orig_imgs.append(skimage.io.imread(os.path.join(data['dir'][i], '%06d27.png' % data['img_idx'])))
+                            else:
+                                orig_imgs.append(skimage.io.imread(os.path.join(data['dir'][i], '%06d.png' % data['img_idx'])))
+                        if app_name == 'temporal':
+                            gt_img = skimage.io.imread(os.path.join(data['gt_dir'], '29%05d.png' % (data['img_idx']-1)))
+                        else:
+                            gt_files = sorted(os.listdir(data['gt_dir']))
+                            gt_img = skimage.io.imread(os.path.join(data['gt_dir'], gt_files[data['img_idx']-1]))
+
+                        orig_imgs = [gt_img] + orig_imgs
+                    else:
+                        orig_imgs = []
+                        for i in range(len(data['other_view'])):
+                            orig_imgs.append(skimage.io.imread(data['other_view'][i]))
+
+
+                    for i in range(len(orig_imgs)):
+
+                        if i == 0:
+                            prefix = 'gt'
+                        elif i == 1:
+                            prefix = 'ours'
+                        elif i == 2:
+                            prefix = 'RGBx'
+                        elif i == 3:
+                            if app_name == 'denoising':
+                                prefix = 'MSAA'
+                            else:
+                                prefix = 'input'
+                        else:
+                            raise
+
+                        img = orig_imgs[i]
+
+                        if app_name in ['denoising', 'post_processing']:
+                            bbox = data['img_zoom_bbox']
+                            crop1 = img[bbox[0]:bbox[1], bbox[2]:bbox[3]]
+                            crop_w = 2
+
+                            for c in range(len(crop_edge_col)):
+                                crop1[:crop_w, :, c] = crop_edge_col[c]
+                                crop1[-crop_w:, :, c] = crop_edge_col[c]
+                                crop1[:, :crop_w, c] = crop_edge_col[c]
+                                crop1[:, -crop_w:, c] = crop_edge_col[c]
+
+                            skimage.io.imsave(os.path.join('result_figs', '%s_%s_%s_zoom.png' % (app_name, shader_name, prefix)), crop1)
+
+                            for i in range(len(bbox)):
+                                edge = bbox[i]
+                                for current_draw in range(edge-bbox_edge_w, edge+bbox_edge_w+1):
+                                    for c in range(len(crop_edge_col)):
+                                        if i < 2:
+                                            img[current_draw, bbox[2]-bbox_edge_w:bbox[3]+bbox_edge_w, c] = crop_edge_col[c]
+                                        else:
+                                            img[bbox[0]-bbox_edge_w:bbox[1]+bbox_edge_w, current_draw, c] = crop_edge_col[c]
+
+                            
+                            if 'crop_box' in data:
+                                crop_box = data['crop_box']
+                                img = img[crop_box[0]:crop_box[1], crop_box[2]:crop_box[3]]
+                            elif app_name == 'post_processing':
+                                img = img[:, post_processing_cropped:-post_processing_cropped]
+                            
+                            skimage.io.imsave(os.path.join('result_figs', '%s_%s_%s_box.png' % (app_name, shader_name, prefix)), img)
+                        else:
+                            skimage.io.imsave(os.path.join('result_figs', '%s_%s_%s.png' % (app_name, shader_name, prefix)), img)
+
+                    if app_name == 'denoising':
+                        macro_suffix = 'WithZoom'
+                    elif app_name == 'post_processing':
+                        macro_suffix = 'ThreeCol'
+                    else:
+                        macro_suffix = 'WithoutZoom'
+
+                    #if fig_start:
+                    if fig_rows == 0 or fig_rows >= max_shader_per_fig:
+                        macro = '\ResultsFigWithHeader' + macro_suffix
+                        fig_start = False
+                        if fig_rows == 0:
+                            str += """
+    \\begin{figure*}
+    """
+                        elif fig_rows >= max_shader_per_fig:
+                            fig_rows -= max_shader_per_fig
+                            str += """
+    \\vspace{-2ex}
+    \caption{%s}
+    \end{figure*}
+
+    \\begin{figure*}
+    """ % app_name
+                    else: 
+                        macro = '\ResultsFigNoHeader' + macro_suffix
+
+                    fig_rows += 1
+
+                    print_name = shader_name
+                    if False:
+                    #if '_simplified' in shader_name:
+                        for name in hue_shaders.keys():
+                            if shader_name.startswith(name):
+                                print_name = name + '\\ simplified'
+                                break
+                    print_name = print_name.replace('_', '\\ ')
+
+                    if app_name == 'denoising':
+                        str += """
+    %s{\%s}{%s_%s}{0\%%}{%d\%%}{100\%%}{%d\,SPP, %d\%%}
+    """ % (macro, print_name, app_name, shader_name, int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100), data['msaa_sample'], int(data['perceptual'][2, 2] / data['perceptual'][1, 2] * 100))
+                    elif app_name == 'post_processing':
+                        str += """
+    %s{\%s: 0\%%}{%s_%s}{100\%%}{%d\%%}
+    """ % (macro, print_name, app_name, shader_name, int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100))
+                    else:
+                        str += """
+    %s{\%s: 0\%%}{%s_%s}{%d\%%}{100\%%}{%d\%%}
+    """ % (macro, print_name, app_name, shader_name, int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100), int(data['perceptual'][2, 2] / data['perceptual'][1, 2] * 100))
+
+            if not fig_start:
+                str += """
+    \\vspace{-2ex}
+    \caption{%s}
+    \end{figure*}
+    """ % app_name.replace('_', ' ')
+
+        open('result_figs/result_pool.tex', 'w').write(str)
+    
+    if 'teaser' in mode or mode == 'all':
+        # generate teaser tex
+
+        app_name = teaser_app
+        shader_name = teaser_shader
+        data = app_shader_dir_200[app_name][shader_name]
+
+        orig_img_w = 960
+        orig_img_h = 640
+
+        img_w = 630
+        zoom_w = 320
+
+        orig_imgs = []
+        for i in range(len(data['other_view'])):
+            orig_imgs.append(skimage.io.imread(data['other_view'][i]))
+
+        crop_size = (orig_img_w - img_w) // 2
+
+        for i in range(len(orig_imgs)):
+            orig_imgs[i] = orig_imgs[i][:, crop_size:-crop_size, :]
+            img = orig_imgs[i]
+
+            if i == 0:
+                prefix = 'gt'
+            elif i == 1:
+                prefix = 'ours'
+            elif i == 2:
+                prefix = 'RGBx'
+            elif i == 3:
+                if app_name == 'denoising':
+                    prefix = 'MSAA'
+                else:
+                    prefix = 'input'
+            else:
+                raise
+
+            bbox = data['img_zoom_bbox']
+            crop1 = img[bbox[0]:bbox[1], bbox[2]:bbox[3]]
+            crop_w = 2
+
+            for c in range(len(crop_edge_col)):
+                crop1[:crop_w, :, c] = crop_edge_col[c]
+                crop1[-crop_w:, :, c] = crop_edge_col[c]
+                crop1[:, :crop_w, c] = crop_edge_col[c]
+                crop1[:, -crop_w:, c] = crop_edge_col[c]
+
+            skimage.io.imsave(os.path.join('result_figs', 'teaser_%s_%s_%s_zoom.png' % (app_name, shader_name, prefix)), crop1)
+
+            for i in range(len(bbox)):
+                edge = bbox[i]
+                for current_draw in range(edge-bbox_edge_w, edge+bbox_edge_w+1):
+                    for c in range(len(crop_edge_col)):
+                        if i < 2:
+                            img[current_draw, bbox[2]-bbox_edge_w:bbox[3]+bbox_edge_w, c] = crop_edge_col[c]
+                        else:
+                            img[bbox[0]-bbox_edge_w:bbox[1]+bbox_edge_w, current_draw, c] = crop_edge_col[c]
+
+            skimage.io.imsave(os.path.join('result_figs', 'teaser_%s_%s_%s_box.png' % (app_name, shader_name, prefix)), img)
+
+        str = """
+
+    \\begin{teaserfigure}
+    \\vspace{1ex}    
+    \ResultsFigTeaser{\%s: 100\%% time, 0\%% error}{teaser_%s_%s}{%.2f\%% time, %d\%% error}{100\%% error}{%d\%% error}
+    \\vspace{-1ex}
+    \caption{pl}
+    \\vspace{2ex}
+    \label{fig:teaser}
+    \end{teaserfigure}
+
+    """ % (shader_name, app_name, shader_name, data['input_time_frag'], int(data['perceptual'][2, 2] / data['perceptual'][1, 2] * 100), int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100))
+
+
+        open('result_figs/teaser.tex', 'w').write(str)
+    
+    if 'html' in mode or mode == 'all':
+        # generate images for html viewer
+        base_dir = 'result_figs/html_viewer'
+        if not os.path.exists(base_dir):
+            os.mkdir(base_dir)
+            
+        app_name_str = ''
+
+        for k in range(len(app_names)):
+            app_name = app_names[k]
+
+            if app_name == 'simulation':
+                continue
+
+            if app_name == 'post_processing':
+                app_name_dir = 'post'
+                app_name_print = 'Post Processing'
+            elif app_name == 'simplified':
+                app_name_dir = 'simplification'
+                app_name_print = 'Simplification'
+            else:
+                app_name_dir = app_name
+                if app_name == 'denoising':
+                    app_name_print = 'Denoising'
+                elif app_name == 'temporal':
+                    app_name_print = 'Temporal Coherence'
+                else:
+                    raise
+                    
+            app_name_str += '%s,%s\n' % (app_name_dir, app_name_print)
+            
+            shader_name_str = ''
+
+            app_name_dir = os.path.join(base_dir, app_name_dir)
+            if not os.path.exists(app_name_dir):
+                os.mkdir(app_name_dir)
+                
+            if app_name == 'denoising':
+                shader_names = ['venice',
+                                'oceanic',
+                                'trippy',
+                                'mandelbulb',
+                                'mandelbrot',
+                                'primitives',
+                                'marble2',
+                                'bricks'
+                               ]
+            elif app_name == 'simplified':
+                shader_names = ['venice',
+                                'trippy',
+                                'mandelbulb',
+                                'mandelbrot',
+                                'bricks'
+                               ]
+            elif app_name == 'post_processing':
+                shader_names = ['mandelbulb_blur',
+                                'trippy_sharpen',
+                                'trippy_simplified_sharpen'
+                               ]
+            elif app_name == 'temporal':
+                shader_names = ['trippy_simplified',
+                               'mandelbrot',
+                               'mandelbulb',
+                               'mandelbrot_simplified',
+                               'mandelbulb_simplified'
+                ]
+            
+            #for shader_name in app_shader_dir_200[app_name].keys():
+            for shader_name in shader_names:
+                shader_dir = os.path.join(app_name_dir, shader_name)
+                if not os.path.exists(shader_dir):
+                    os.mkdir(shader_dir)
+
+                data = app_shader_dir_200[app_name][shader_name]
+
+                if 'img_idx' in data.keys() or 'other_view' in data.keys():
+                    
+                    shader_name_str += '%s,%s\n' % (shader_name, data['print'])
+                    
+                    conditions_str = ''
+
+                    if 'img_idx' in data.keys():
+                        
+                        if shader_name == 'mandelbrot':
+                            for i in range(len(data['dir'])):
+                                if data['dir'][i].endswith('/'):
+                                    data['dir'][i] = data['dir'][i][:-1]
+                                if 'gamma_corrected' not in data['dir'][i]:
+                                    data['dir'][i] = data['dir'][i] + '_gamma_corrected'
+                            if data['gt_dir'].endswith('/'):
+                                data['gt_dir'] = data['gt_dir']
+                            if 'gamma_corrected' not in data['gt_dir']:
+                                data['gt_dir'] = data['gt_dir'] + '_gamma_corrected'
+
+
+                        orig_imgs = []
+                        for i in range(len(data['dir'])):
+                            if app_name == 'temporal':
+                                orig_imgs.append(os.path.join(data['dir'][i], '%06d27.png' % data['img_idx']))
+                            else:
+                                orig_imgs.append(os.path.join(data['dir'][i], '%06d.png' % data['img_idx']))
+                        if app_name == 'temporal':
+                            gt_img = os.path.join(data['gt_dir'], '29%05d.png' % (data['img_idx']-1))
+                        else:
+                            gt_files = sorted(os.listdir(data['gt_dir']))
+                            gt_img = os.path.join(data['gt_dir'], gt_files[data['img_idx']-1])
+
+                        orig_imgs = [gt_img] + orig_imgs
+                    else:
+                        orig_imgs = []
+                        for i in range(len(data['other_view'])):
+                            orig_imgs.append(data['other_view'][i])
+
+                    for i in range(len(orig_imgs)):
+                        src = orig_imgs[i]
+                        if i == 0:
+                            dst_name = 'reference'
+                            condition_print = 'Reference'
+                            rel_perceptual = 0
+                            rel_l2 = 0
+                        elif i == 1:
+                            dst_name = 'ours'
+                            condition_print = 'Ours'
+                            rel_perceptual = int(100 * data['perceptual'][0, 2] / data['perceptual'][1, 2])
+                            rel_l2 = int(100 * data['l2'][0, 2] / data['l2'][1, 2])
+                        elif i == 2:
+                            dst_name = 'baseline'
+                            condition_print = 'RGBx Baseline'
+                            rel_perceptual = 100
+                            rel_l2 = 100
+                        elif i == 3:
+                            if app_name == 'denoising':
+                                dst_name = 'baseline2'
+                                condition_print = 'SuperSampling Baseline'
+                            else:
+                                dst_name = 'input'
+                                condition_print = 'Input'
+                            try:
+                                rel_perceptual = int(100 * data['perceptual'][2, 2] / data['perceptual'][1, 2])
+                                rel_l2 = int(100 * data['l2'][2, 2] / data['l2'][1, 2])
+                            except:
+                                print(shader_name, app_name)
+                                raise
+                        else:
+                            raise
+                        dst = os.path.join(shader_dir, dst_name + '.png')
+                        shutil.copyfile(src, dst)
+                        
+                        caption = '%s / %s / %s' % (app_name_print, data['print'], condition_print)
+                        #if dst_name != 'input':
+                        caption += ' / Relative Perceptual Error: %d%%; Relative L2 Error: %d%%.' % (rel_perceptual, rel_l2)
+                        if app_name == 'temporal' and shader_name == 'mandelbulb_simplified':
+                            caption = '"' + caption + ' \nIn this example, input is having less L2 error than RGBx baseline because the baseline is unable to synthesize to longer sequences."'
+                        conditions_str += '%s,%s,%s\n' % (dst_name + '.png', condition_print, caption)
+                        
+                    open(os.path.join(shader_dir, 'conditions.csv'), 'w').write(conditions_str)
+            
+            open(os.path.join(app_name_dir, 'shaders.csv'), 'w').write(shader_name_str)
+            
+        open(os.path.join(base_dir, 'applications.csv'), 'w').write(app_name_str)
+                
     if False:
         names_and_dirs = [('\\begin{tabular}[c]{@{}c@{}}\\oceanic \\\\ Fig. 1 \\\\ \\tracelen\ = 702\\end{tabular}',
                           '1x_1sample_oceanic_simple_tile_sigma_03_continued/test/',

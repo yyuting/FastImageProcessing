@@ -72,6 +72,9 @@ tf.Tensor.__rmul__ = new_mul
 tf.Tensor.__add__ = new_add
 tf.Tensor.__radd__ = new_add
 
+def select_smooth(a, b, c):
+    return a * b + (1 - a) * c
+
 def select_nosmooth(a, b, c):
 
     all_scalar = True
