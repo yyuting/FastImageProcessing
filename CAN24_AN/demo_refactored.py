@@ -51,7 +51,7 @@ padding_offset = 32
 
 deprecated_options = ['feature_reduction_channel_by_samples', 'is_npy', 'orig_channel', 'nsamples', 'is_bin', 'upsample_scale', 'upsample_single', 'upsample_shrink_feature', 'clip_weights', 'deconv', 'share_weights', 'clip_weights_percentage', 'encourage_sparse_features', 'collect_validate_loss', 'validate_loss_freq', 'collect_validate_while_training', 'clip_weights_percentage_after_normalize', 'normalize_weights', 'normalize_weights', 'rowwise_L2_normalize', 'Frobenius_normalize', 'bilinear_upsampling', 'full_resolution', 'unet', 'unet_base_channel', 'learn_scale', 'soft_scale', 'scale_ratio', 'use_sigmoid', 'orig_rgb', 'use_weight_map', 'render_camera_pos_velocity', 'gradient_loss', 'normalize_grad', 'grayscale_grad', 'cos_sim', 'gradient_loss_scale', 'gradient_loss_all_pix', 'gradient_loss_canny_weight', 'two_stage_training', 'new_minimizer', 'weight_map_add', 'sigmoid_scaling', 'visualize_scaling', 'visualize_ind', 'test_tiling', 'motion_blur', 'dynamic_training_samples', 'dynamic_training_mode', 'automatic_find_gpu', 'test_rotation', 'abs_normalize', 'feature_reduction_regularization_scale', 'learn_sigma', 'repeat_timing']
 
-def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', feature_w=[], color_inds=[], intersection=True, manual_features_only=False, aux_plus_manual_features=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, first_n=-1, first_n_no_last=-1, mean_var_only=False, zero_samples=False, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None, every_nth=-1, every_nth_stratified=False, one_hop_parent=False, target_idx=[], use_manual_index=False, manual_index_file='', additional_features=True, ignore_last_n_scale=0, include_noise_feature=False, crop_h=-1, crop_w=-1, no_noise_feature=False, relax_clipping=False, render_sigma=None, same_sample_all_pix=False, stratified_sample_higher_res=False, samples_int=[None], texture_maps=[], partial_trace=1.0, use_lstm=False, lstm_nfeatures_per_group=1, rotate=0, flip=0, use_dataroot=True, automatic_subsample=False, automate_raymarching_def=False, chron_order=False, def_loop_log_last=False, temporal_texture_buffer=False, texture_inds=[], log_only_return_def_raymarching=True, debug=[], SELECT_FEATURE_THRE=200, n_boids=40, log_getitem=True, color_scale=[], parallel_stack=True, compiler_problem_idx=-1, input_feature_pl=[], input_to_shader=[], trace_features=[], input_feature_scale_bias=[]):
+def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', feature_w=[], color_inds=[], intersection=True, manual_features_only=False, aux_plus_manual_features=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, first_n=-1, first_n_no_last=-1, mean_var_only=False, zero_samples=False, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None, every_nth=-1, every_nth_stratified=False, one_hop_parent=False, target_idx=[], use_manual_index=False, manual_index_file='', additional_features=True, ignore_last_n_scale=0, include_noise_feature=False, crop_h=-1, crop_w=-1, no_noise_feature=False, relax_clipping=False, render_sigma=None, same_sample_all_pix=False, stratified_sample_higher_res=False, samples_int=[None], texture_maps=[], partial_trace=1.0, use_lstm=False, lstm_nfeatures_per_group=1, rotate=0, flip=0, use_dataroot=True, automatic_subsample=False, automate_raymarching_def=False, chron_order=False, def_loop_log_last=False, temporal_texture_buffer=False, texture_inds=[], log_only_return_def_raymarching=True, debug=[], SELECT_FEATURE_THRE=200, n_boids=40, log_getitem=True, color_scale=[], parallel_stack=True, compiler_problem_idx=-1, input_feature_pl=[], input_to_shader=[], trace_features=[], input_feature_scale_bias=[], finite_diff=False):
     # 2x_1sample on margo
     #camera_pos = np.load('/localtmp/yuting/out_2x1_manual_carft/train.npy')[0, :]
 
@@ -258,7 +258,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
     else:
         feature_pl = []
 
-    features, vec_output, manual_features = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, geometry=geometry, return_vec_output=True, compiler_module=compiler_module, manual_features_only=manual_features_only, aux_plus_manual_features=aux_plus_manual_features, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=samples, fov=fov, camera_pos_velocity=camera_pos_velocity, t_sigma=t_sigma, zero_samples=zero_samples, render_fix_spatial_sample=render_fix_spatial_sample, render_fix_temporal_sample=render_fix_temporal_sample, render_zero_spatial_sample=render_zero_spatial_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples, additional_features=additional_features, include_noise_feature=include_noise_feature, no_noise_feature=no_noise_feature, render_sigma=render_sigma, same_sample_all_pix=same_sample_all_pix, stratified_sample_higher_res=stratified_sample_higher_res, samples_int=samples_int, texture_maps=texture_maps, temporal_texture_buffer=temporal_texture_buffer, n_boids=n_boids, texture_map_size=texture_map_size, debug=debug, input_feature_pl=feature_pl, input_to_shader=input_to_shader, phase=compiler_problem_idx)
+    features, vec_output, manual_features = get_render(camera_pos, shader_time, nsamples=nsamples, shader_name=shader_name, geometry=geometry, return_vec_output=True, compiler_module=compiler_module, manual_features_only=manual_features_only, aux_plus_manual_features=aux_plus_manual_features, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=samples, fov=fov, camera_pos_velocity=camera_pos_velocity, t_sigma=t_sigma, zero_samples=zero_samples, render_fix_spatial_sample=render_fix_spatial_sample, render_fix_temporal_sample=render_fix_temporal_sample, render_zero_spatial_sample=render_zero_spatial_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples, additional_features=additional_features, include_noise_feature=include_noise_feature, no_noise_feature=no_noise_feature, render_sigma=render_sigma, same_sample_all_pix=same_sample_all_pix, stratified_sample_higher_res=stratified_sample_higher_res, samples_int=samples_int, texture_maps=texture_maps, temporal_texture_buffer=temporal_texture_buffer, n_boids=n_boids, texture_map_size=texture_map_size, debug=debug, input_feature_pl=feature_pl, input_to_shader=input_to_shader, phase=compiler_problem_idx, finite_diff=finite_diff)
     
     if len(input_feature_pl) > 0:
         # hack, should fix later to generalize better
@@ -559,7 +559,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
     #numpy.save('valid_inds.npy', valid_inds)
     #return features
 
-def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None, geometry='plane', zero_samples=False, debug=[], extra_args=[None], render_g=False, manual_features_only=False, aux_plus_manual_features=False, fov='regular', h_start=0, h_offset=height, w_start=0, w_offset=width, camera_pos_velocity=None, t_sigma=1/60.0, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None, additional_features=True, include_noise_feature=False, no_noise_feature=False, same_sample_all_pix=False, stratified_sample_higher_res=False, samples_int=[None], texture_maps=[], temporal_texture_buffer=False, n_boids=40, texture_map_size=[], input_feature_pl=[], input_to_shader=[], phase=-1):
+def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='zigzag', color_inds=None, return_vec_output=False, render_size=None, render_sigma=None, compiler_module=None, geometry='plane', zero_samples=False, debug=[], extra_args=[None], render_g=False, manual_features_only=False, aux_plus_manual_features=False, fov='regular', h_start=0, h_offset=height, w_start=0, w_offset=width, camera_pos_velocity=None, t_sigma=1/60.0, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None, additional_features=True, include_noise_feature=False, no_noise_feature=False, same_sample_all_pix=False, stratified_sample_higher_res=False, samples_int=[None], texture_maps=[], temporal_texture_buffer=False, n_boids=40, texture_map_size=[], input_feature_pl=[], input_to_shader=[], phase=-1, finite_diff=False):
 
     assert compiler_module is not None
 
@@ -716,6 +716,10 @@ def get_render(camera_pos, shader_time, samples=None, nsamples=1, shader_name='z
     # TODO: potential bug here
     # what to put if zero_samples = True
     
+    if finite_diff:
+        sample1 = tf.tile(sample1, [int(camera_pos.shape[1]), 1, 1])
+        sample2 = tf.tile(sample2, [int(camera_pos.shape[1]), 1, 1])
+    
     if (not no_noise_feature) and not geometry.startswith('boids'):
         if (additional_features or include_noise_feature):
             f_log_intermediate[features_len-2] = sample1
@@ -867,13 +871,12 @@ def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None], f
         return features
     if fov == 'regular':
         ray_dir = [x[0] - width / 2, x[1] + 1, width / 2]
-        #print("use regular fov (90 degrees horizontally)")
     elif fov == 'small':
         ray_dir = [x[0] - width / 2, x[1] - height / 2, 1.73 * width / 2]
         #print("use small fov (60 degrees horizontally)")
     else:
         raise
-
+        
     if camera_pos_velocity is None:
         ray_origin = [camera_pos[0], camera_pos[1], camera_pos[2]]
         ang1 = camera_pos[3]
@@ -1507,6 +1510,9 @@ def generate_parser():
     parser.add_argument('--render_dirname', dest='render_dirname', default='render', help='directory used to store render result')
     parser.add_argument('--render_tile_start', dest='render_tile_start', default='', help='specifies the tile start for each rendering if render in test_training mode')
     parser.add_argument('--vgg_channels', dest='vgg_channels', default='', help='if specified, use these channel number to replace default vgg network')
+    parser.add_argument('--feature_reduction_ch', dest='feature_reduction_ch', type=int, default=-1, help='specifies dimensionality after feature reduction channel. By default it should be the same as following initial layer or dilation layers, but we might want to change the dimensionality larger for fair RGBx comparison')
+    parser.add_argument('--feed_dict_optimize_input', dest='feed_dict_optimize_input', action='store_true', help='if specified, create pl for optimize input mode, instead of variable')
+    parser.add_argument('--finite_diff', dest='finite_diff', action='store_true', help='if specified, create 2 extra copy of camera_pos and shader_time in the batch dimension that can be used to compute finite difference later')
     
     parser.set_defaults(is_train=False)
     parser.set_defaults(use_batch=False)
@@ -1604,6 +1610,8 @@ def generate_parser():
     parser.set_defaults(loss_proxy_encourage_0=False)
     parser.set_defaults(collect_inference_tensor=False)
     parser.set_defaults(render_no_video=False)
+    parser.set_defaults(feed_dict_optimize_input=False)
+    parser.set_defaults(finite_diff=False)
     
     return parser
 
@@ -1656,6 +1664,8 @@ def copy_option(args):
     delattr(new_args, 'render_no_video')
     delattr(new_args, 'render_dirname')
     delattr(new_args, 'render_tile_start')
+    delattr(new_args, 'feed_dict_optimize_input')
+    delattr(new_args, 'finite_diff')
     return new_args
 
 def main_network(args):
@@ -1845,8 +1855,16 @@ def main_network(args):
     target_pl_h = output_pl_h
         
     if args.learn_loss_proxy and args.proxy_loss_type == 'from_data':
-        gt_loss_train = np.load(os.path.join(args.dataroot, 'train_loss.npy'))
-        gt_loss_val = np.load(os.path.join(args.dataroot, 'validate_loss.npy'))
+        if args.is_train:
+            gt_loss_train = np.load(os.path.join(args.dataroot, 'train_loss.npy'))
+            gt_loss_val = np.load(os.path.join(args.dataroot, 'validate_loss.npy'))
+            
+        else:
+            if args.test_training:
+                # try not to use test_training mode since enumerate all training combination can be super slow...
+                gt_loss_train = np.load(os.path.join(args.dataroot, 'train_loss.npy'))
+            else:
+                gt_loss_train = np.load(os.path.join(args.dataroot, 'test_loss.npy'))
         
         output_pl_w = gt_loss_train.shape[3]
         output_pl_h = gt_loss_train.shape[2]
@@ -1981,6 +1999,8 @@ def main_network(args):
         if args.learn_loss_proxy:
             if args.optimize_input:
                 target_pl = np.expand_dims(np.float32(cv2.imread(args.target_img, -1)) / 255.0, 0)
+                if args.finite_diff:
+                    target_pl = np.tile(target_pl, [8, 1, 1, 1])
             else:
                 target_pl = tf.placeholder(tf.float32, shape=[None, target_pl_h, target_pl_w, target_nc])
             output_nc = 1
@@ -2193,10 +2213,36 @@ def main_network(args):
                 shader_time_scale = 1
             
             #camera_pos_var = tf.Variable(np.zeros([camera_pos_len, args.batch_size]), dtype=dtype)
-            camera_pos_var = tf.Variable((camera_pos_training_pool[:args.batch_size].transpose() + camera_pos_bias) / camera_pos_scale, dtype=dtype)
-            shader_time_var = tf.Variable(np.zeros(args.batch_size), dtype=dtype)
-            camera_pos = camera_pos_var * camera_pos_scale - camera_pos_bias
-            shader_time = shader_time_var * shader_time_scale - shader_time_bias
+            if args.feed_dict_optimize_input:
+                camera_pos_var = tf.placeholder(dtype, shape=[camera_pos_len, args.batch_size])
+                shader_time_var = tf.placeholder(dtype, shape=args.batch_size)
+            else:
+                camera_pos_var = tf.Variable((camera_pos_training_pool[:args.batch_size].transpose() + camera_pos_bias) / camera_pos_scale, dtype=dtype)
+                shader_time_var = tf.Variable(np.zeros(args.batch_size), dtype=dtype)
+                
+                
+            if args.finite_diff:
+                finite_h = 1e-2
+                # for computational efficientcy we only add 7 more examples, finite diff will be computed as
+                # (f(x + h) - f(x)) / h
+                
+                shader_time_finite = tf.concat((tf.tile(shader_time_var, [7]), shader_time_var + finite_h), 0)
+                
+                camera_stacks = [camera_pos_var]                            
+                current_finite = np.zeros(6)    
+                for i in range(6):
+                    current_finite[:] = 0
+                    current_finite[i] = finite_h
+                    camera_stacks.append(camera_pos_var + np.expand_dims(current_finite, 1))
+                camera_stacks.append(camera_pos_var)
+                
+                camera_pos_finite = tf.concat(camera_stacks, 1)
+            else:
+                shader_time_finite = shader_time_var
+                camera_pos_finite = camera_pos_var
+                
+            camera_pos = camera_pos_finite * camera_pos_scale - camera_pos_bias
+            shader_time = shader_time_finite * shader_time_scale - shader_time_bias
         else:
             camera_pos = tf.placeholder(dtype, shape=[camera_pos_len, args.batch_size])
             shader_time = tf.placeholder(dtype, shape=args.batch_size)
@@ -2314,7 +2360,7 @@ def main_network(args):
         def generate_input_to_network_wrapper():
             def func(texture_maps_input):
             
-                return get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection, manual_features_only=args.manual_features_only, aux_plus_manual_features=args.aux_plus_manual_features, efficient_trace=args.efficient_trace, collect_loop_statistic=args.collect_loop_statistic, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=feed_samples, fov=args.fov, camera_pos_velocity=camera_pos_velocity, first_last_only=args.first_last_only, last_only=args.last_only, subsample_loops=args.subsample_loops, last_n=args.last_n, first_n=args.first_n, first_n_no_last=args.first_n_no_last, mean_var_only=args.mean_var_only, zero_samples=zero_samples, render_fix_spatial_sample=args.render_fix_spatial_sample, render_fix_temporal_sample=args.render_fix_temporal_sample, render_zero_spatial_sample=args.render_zero_spatial_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples, every_nth=args.every_nth, every_nth_stratified=args.every_nth_stratified, one_hop_parent=args.one_hop_parent, target_idx=target_idx, use_manual_index=args.use_manual_index, manual_index_file=args.manual_index_file, additional_features=args.additional_features, ignore_last_n_scale=args.ignore_last_n_scale, include_noise_feature=args.include_noise_feature, crop_h=args.crop_h, crop_w=args.crop_w, no_noise_feature=args.no_noise_feature, relax_clipping=args.relax_clipping, render_sigma=render_sigma, same_sample_all_pix=args.same_sample_all_pix, stratified_sample_higher_res=args.stratified_sample_higher_res, samples_int=samples_int, texture_maps=texture_maps_input, partial_trace=args.partial_trace, use_lstm=args.use_lstm, lstm_nfeatures_per_group=args.lstm_nfeatures_per_group, rotate=rotate, flip=flip, use_dataroot=args.use_dataroot, automatic_subsample=args.automatic_subsample, automate_raymarching_def=args.automate_raymarching_def, chron_order=args.chron_order, def_loop_log_last=args.def_loop_log_last, temporal_texture_buffer=args.temporal_texture_buffer, texture_inds=texture_inds, log_only_return_def_raymarching=args.log_only_return_def_raymarching, SELECT_FEATURE_THRE=args.SELECT_FEATURE_THRE, n_boids=args.n_boids, log_getitem=args.log_getitem, debug=debug, color_scale=color_scale, parallel_stack=not args.optimize_input, compiler_problem_idx=args.compiler_problem_idx, input_feature_pl=input_feature_pl, input_to_shader=input_to_shader, trace_features=trace_features, input_feature_scale_bias=input_feature_scale_bias)
+                return get_tensors(args.dataroot, args.name, camera_pos, shader_time, output_type, shader_samples, shader_name=args.shader_name, geometry=args.geometry, feature_w=feature_w, color_inds=color_inds, intersection=args.intersection, manual_features_only=args.manual_features_only, aux_plus_manual_features=args.aux_plus_manual_features, efficient_trace=args.efficient_trace, collect_loop_statistic=args.collect_loop_statistic, h_start=h_start, h_offset=h_offset, w_start=w_start, w_offset=w_offset, samples=feed_samples, fov=args.fov, camera_pos_velocity=camera_pos_velocity, first_last_only=args.first_last_only, last_only=args.last_only, subsample_loops=args.subsample_loops, last_n=args.last_n, first_n=args.first_n, first_n_no_last=args.first_n_no_last, mean_var_only=args.mean_var_only, zero_samples=zero_samples, render_fix_spatial_sample=args.render_fix_spatial_sample, render_fix_temporal_sample=args.render_fix_temporal_sample, render_zero_spatial_sample=args.render_zero_spatial_sample, spatial_samples=spatial_samples, temporal_samples=temporal_samples, every_nth=args.every_nth, every_nth_stratified=args.every_nth_stratified, one_hop_parent=args.one_hop_parent, target_idx=target_idx, use_manual_index=args.use_manual_index, manual_index_file=args.manual_index_file, additional_features=args.additional_features, ignore_last_n_scale=args.ignore_last_n_scale, include_noise_feature=args.include_noise_feature, crop_h=args.crop_h, crop_w=args.crop_w, no_noise_feature=args.no_noise_feature, relax_clipping=args.relax_clipping, render_sigma=render_sigma, same_sample_all_pix=args.same_sample_all_pix, stratified_sample_higher_res=args.stratified_sample_higher_res, samples_int=samples_int, texture_maps=texture_maps_input, partial_trace=args.partial_trace, use_lstm=args.use_lstm, lstm_nfeatures_per_group=args.lstm_nfeatures_per_group, rotate=rotate, flip=flip, use_dataroot=args.use_dataroot, automatic_subsample=args.automatic_subsample, automate_raymarching_def=args.automate_raymarching_def, chron_order=args.chron_order, def_loop_log_last=args.def_loop_log_last, temporal_texture_buffer=args.temporal_texture_buffer, texture_inds=texture_inds, log_only_return_def_raymarching=args.log_only_return_def_raymarching, SELECT_FEATURE_THRE=args.SELECT_FEATURE_THRE, n_boids=args.n_boids, log_getitem=args.log_getitem, debug=debug, color_scale=color_scale, parallel_stack=not args.optimize_input, compiler_problem_idx=args.compiler_problem_idx, input_feature_pl=input_feature_pl, input_to_shader=input_to_shader, trace_features=trace_features, input_feature_scale_bias=input_feature_scale_bias, finite_diff=args.finite_diff)
             
             return func
             
@@ -2385,13 +2431,18 @@ def main_network(args):
                 regularizer = None
 
             actual_nfeatures = args.input_nc
+            
+            if args.feature_reduction_ch > 0:
+                actual_feature_reduction_ch = args.feature_reduction_ch
+            else:
+                actual_feature_reduction_ch = args.initial_layer_channels
 
             if ndims == 2:
-                w_shape = [1, 1, actual_nfeatures, args.initial_layer_channels]
+                w_shape = [1, 1, actual_nfeatures, actual_feature_reduction_ch]
                 conv = tf.nn.conv2d
                 strides = [1, 1, 1, 1]
             else:
-                w_shape = [1, actual_nfeatures, args.initial_layer_channels]
+                w_shape = [1, actual_nfeatures, actual_feature_reduction_ch]
                 conv = tf.nn.conv1d
                 strides = 1
             weights = tf.get_variable('w0', w_shape, initializer=tf.contrib.layers.xavier_initializer() if not args.identity_initialize else identity_initializer(color_inds, ndims=ndims), regularizer=regularizer)
@@ -4270,6 +4321,7 @@ def main_network(args):
                     args.repeat_timing = 1
                 
                 nexamples = time_vals.shape[0]
+                ncameras = nexamples
                 if args.temporal_texture_buffer:
                     # for regular test, only inference once
                     # start from a texture buffer rendered from gt
@@ -4277,11 +4329,16 @@ def main_network(args):
                     # for efficiency, do not render overlapping frames
                     nexamples -= 1
                     nexamples = nexamples // 10
+                elif args.learn_loss_proxy and args.proxy_loss_type == 'from_data':
+                    nexamples = time_vals.shape[0] ** 2
+                
                 all_test = np.zeros(nexamples, dtype=float)
                 all_grad = np.zeros(nexamples, dtype=float)
                 all_l2 = np.zeros(nexamples, dtype=float)
                 all_perceptual = np.zeros(nexamples, dtype=float)
-                if args.learn_loss_proxy:
+                python_time = numpy.zeros(nexamples)
+                
+                if args.learn_loss_proxy and (not args.proxy_loss_type == 'from_data'):
                     all_loss_proxy = np.zeros((nexamples, 2), dtype=float)
                 if args.train_temporal_seq:
                     previous_buffer = np.empty([1, input_pl_h, input_pl_w, 6*(args.nframes_temporal_gen-1)])
@@ -4292,70 +4349,79 @@ def main_network(args):
                         feed_dict[rotate] = 0
                         feed_dict[flip] = 0
                     if not args.use_queue:
-                        camera_val = np.expand_dims(camera_pos_vals[i, :], axis=1)
-                        #feed_dict = {camera_pos: camera_val, shader_time: time_vals[i:i+1]}
-                        feed_dict[camera_pos] = camera_val
-                        feed_dict[shader_time] = time_vals[i:i+1]
-
-                        if args.use_dataroot and args.temporal_texture_buffer:
-                            # TODO: this only works for fluid approx app
-                            camera_val = np.empty([33, 1])
-                            camera_val[:, 0] = np.reshape(camera_pos_vals[i*10:i*10+11, 3:], 33)
+                        
+                        if args.learn_loss_proxy and args.proxy_loss_type == 'from_data':
+                            target_pl_idx = i // ncameras
+                            source_idx = i % ncameras
+                            feed_dict[output_pl] = np.expand_dims(np.expand_dims(gt_loss_train[target_pl_idx, source_idx], 0), 3)
+                            feed_dict[shader_time] = [time_vals[source_idx]]
+                            feed_dict[camera_pos] = np.expand_dims(camera_pos_vals[source_idx, :], axis=1)
+                            feed_dict[target_pl] = np.expand_dims(read_name(val_img_names[target_pl_idx], False, False), 0)
+                        else:    
+                            camera_val = np.expand_dims(camera_pos_vals[i, :], axis=1)
+                            #feed_dict = {camera_pos: camera_val, shader_time: time_vals[i:i+1]}
                             feed_dict[camera_pos] = camera_val
-                            feed_dict[shader_time] = time_vals[i*10:i*10+1]
+                            feed_dict[shader_time] = time_vals[i:i+1]
+
+                            if args.use_dataroot and args.temporal_texture_buffer:
+                                # TODO: this only works for fluid approx app
+                                camera_val = np.empty([33, 1])
+                                camera_val[:, 0] = np.reshape(camera_pos_vals[i*10:i*10+11, 3:], 33)
+                                feed_dict[camera_pos] = camera_val
+                                feed_dict[shader_time] = time_vals[i*10:i*10+1]
 
 
-                    if not args.use_queue:
-                        if args.use_dataroot:
-                            if args.temporal_texture_buffer:
-                                output_ground = np.empty([1, output_pl.shape[1].value, output_pl.shape[2].value, output_nc])
-                                # a hack to read 10 frames after selected idx in fluid approx mode
-                                # at first we only test inference on input with every 10 frames
-                                # so that output frame will be non overlapping
-                                # for index i, output gt is i+1 to i+10
-                                for seq_id in range(10):
-                                    output_ground[0, :, :, seq_id*3:seq_id*3+3] = read_name(val_img_names[i*10+seq_id+1], False)
+                            if args.use_dataroot:
+                                if args.temporal_texture_buffer:
+                                    output_ground = np.empty([1, output_pl.shape[1].value, output_pl.shape[2].value, output_nc])
+                                    # a hack to read 10 frames after selected idx in fluid approx mode
+                                    # at first we only test inference on input with every 10 frames
+                                    # so that output frame will be non overlapping
+                                    # for index i, output gt is i+1 to i+10
+                                    for seq_id in range(10):
+                                        output_ground[0, :, :, seq_id*3:seq_id*3+3] = read_name(val_img_names[i*10+seq_id+1], False)
 
 
-                                current_texture_maps = np.transpose(np.load(val_names[i*10]), (2, 0, 1))
-                                with warnings.catch_warnings():
-                                    warnings.simplefilter("ignore")
-                                    if not (current_texture_maps.shape[1] == height and current_texture_maps.shape[2] == width):
-                                        current_texture_maps = skimage.transform.resize(current_texture_maps, (current_texture_maps.shape[0], height, width))
-                                for k in range(len(texture_maps)):
-                                    feed_dict[texture_maps[k]] = current_texture_maps[k]
-                            elif args.train_temporal_seq:
-                                output_ground = None
-                            else:
-                                if args.learn_loss_proxy:
-                                    # placeholder sampling stragety for target output
-                                    # for each example, compute the loss twoce
-                                    # once with the target that is exactly the same as the expected output
-                                    # another time use the next wrapped len(dataset) // 2 index
-      
-                                    output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
-                                    
-                                    target_idx = (i + len(val_img_names) // 2) % (len(val_img_names))
-                                    target_ground = np.expand_dims(read_name(val_img_names[target_idx], False, False), 0)
-
+                                    current_texture_maps = np.transpose(np.load(val_names[i*10]), (2, 0, 1))
+                                    with warnings.catch_warnings():
+                                        warnings.simplefilter("ignore")
+                                        if not (current_texture_maps.shape[1] == height and current_texture_maps.shape[2] == width):
+                                            current_texture_maps = skimage.transform.resize(current_texture_maps, (current_texture_maps.shape[0], height, width))
+                                    for k in range(len(texture_maps)):
+                                        feed_dict[texture_maps[k]] = current_texture_maps[k]
+                                elif args.train_temporal_seq:
+                                    output_ground = None
                                 else:
-                                    output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
-                                
+                                    if args.learn_loss_proxy:
 
-                        else:
-                            output_ground = np.empty([1, args.input_h, args.input_w, 3])
+                                        # placeholder sampling stragety for target output
+                                        # for each example, compute the loss twoce
+                                        # once with the target that is exactly the same as the expected output
+                                        # another time use the next wrapped len(dataset) // 2 index
 
-                        if args.tile_only:
-                            if not inference_entire_img_valid:
-                                feed_dict[h_start] = tile_start_vals[i:i+1, 0] - padding_offset / 2
-                                feed_dict[w_start] = tile_start_vals[i:i+1, 1] - padding_offset / 2
+                                        output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
+
+                                        target_idx = (i + len(val_img_names) // 2) % (len(val_img_names))
+                                        target_ground = np.expand_dims(read_name(val_img_names[target_idx], False, False), 0)
+
+                                    else:
+                                        output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
+
+
                             else:
-                                feed_dict[h_start] = np.array([- padding_offset / 2])
-                                feed_dict[w_start] = np.array([- padding_offset / 2])
-                        if output_ground is not None:
-                            feed_dict[output_pl] = output_ground
-                        if args.additional_input:
-                            feed_dict[additional_input_pl] = np.expand_dims(np.expand_dims(read_name(val_add_names[i], True), axis=2), axis=0)
+                                output_ground = np.empty([1, args.input_h, args.input_w, 3])
+
+                            if args.tile_only:
+                                if not inference_entire_img_valid:
+                                    feed_dict[h_start] = tile_start_vals[i:i+1, 0] - padding_offset / 2
+                                    feed_dict[w_start] = tile_start_vals[i:i+1, 1] - padding_offset / 2
+                                else:
+                                    feed_dict[h_start] = np.array([- padding_offset / 2])
+                                    feed_dict[w_start] = np.array([- padding_offset / 2])
+                            if output_ground is not None:
+                                feed_dict[output_pl] = output_ground
+                            if args.additional_input:
+                                feed_dict[additional_input_pl] = np.expand_dims(np.expand_dims(read_name(val_add_names[i], True), axis=2), axis=0)
                         
 
                     #output_buffer = numpy.zeros(output_ground.shape)
@@ -4493,7 +4559,7 @@ def main_network(args):
                     else:
                         if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
                             nruns = args.estimator_samples
-                        elif args.learn_loss_proxy:
+                        elif args.learn_loss_proxy and (not args.proxy_loss_type == 'from_data'):
                             nruns = 2
                             assert output_nc == 1
                             output_images = []
@@ -4503,7 +4569,7 @@ def main_network(args):
                         st_sum = 0
                         timeline_sum = 0
                         for k in range(nruns):
-                            if args.learn_loss_proxy:
+                            if args.learn_loss_proxy and (not args.proxy_loss_type == 'from_data'):
                                 if k == 0:
                                     feed_dict[target_pl] = output_ground
                                 else:
@@ -4523,12 +4589,14 @@ def main_network(args):
                                 time_count += 1
                             if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
                                 output_buffer += output_image[:, :, :, ::-1]
-                            if args.learn_loss_proxy:
+                            if args.learn_loss_proxy and (not args.proxy_loss_type == 'from_data'):
                                 output_images.append(output_image)
                                 l2_loss_vals += l2_loss_val
                                 all_loss_proxy[i, k] = np.mean(output_image)
+                            else:
+                                output_images = [output_image]
                         st2 = time.time()
-                        if args.learn_loss_proxy:
+                        if args.learn_loss_proxy and (not args.proxy_loss_type == 'from_data'):
                             l2_loss_val = l2_loss_vals / nruns
                         #print("rough time estimate:", st2 - st)
                         print(current_ind_val, "rough time estimate:", st_sum)
@@ -4601,11 +4669,17 @@ def main_network(args):
                     
                 open("%s/all_loss.txt"%debug_dir, 'w').write("%f, %f"%(np.mean(all_l2), np.mean(all_grad)))
                 numpy.save(os.path.join(debug_dir, 'python_time.npy'), python_time)
+                #numpy.save(os.path.join(debug_dir, 'all_l2.npy'), all_l2)
                 if args.generate_timeline:
                     numpy.save(os.path.join(debug_dir, 'timeline_time.npy'), timeline_time)
                 open("%s/all_time.txt"%debug_dir, 'w').write("%f"%(np.median(python_time)))
                 if args.learn_loss_proxy:
-                    numpy.save(os.path.join(debug_dir, 'all_loss_proxy.npy'), all_loss_proxy)
+                    if args.proxy_loss_type == 'from_data':
+                        all_l2 = all_l2.reshape((ncameras, ncameras))
+                        # indexed by [target_idx, source_idx]
+                        np.save(os.path.join(debug_dir, 'all_loss_proxy.npy'), all_l2)
+                    else:
+                        numpy.save(os.path.join(debug_dir, 'all_loss_proxy.npy'), all_loss_proxy)
                 print("all times saved")
         
         test_dirname = debug_dir
