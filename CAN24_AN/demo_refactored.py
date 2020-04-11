@@ -1,8 +1,8 @@
 from __future__ import division
 
-import gpu_utils
+import gpu_util
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_utils.pick_gpu_lowest_memory())
+os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_util.pick_gpu_lowest_memory())
 
 import matplotlib
 matplotlib.use('Agg')
