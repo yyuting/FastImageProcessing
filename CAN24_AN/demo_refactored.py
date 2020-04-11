@@ -869,9 +869,9 @@ def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None], f
         if geometry == 'boids_coarse':
             features[6] = tf.expand_dims(x[1], 1) * tf.ones_like(features[0])
         return features
-    if fov == 'regular':
+    if fov.startswith('regular'):
         ray_dir = [x[0] - width / 2, x[1] + 1, width / 2]
-    elif fov == 'small':
+    elif fov.startswith('small'):
         ray_dir = [x[0] - width / 2, x[1] - height / 2, 1.73 * width / 2]
         #print("use small fov (60 degrees horizontally)")
     else:
@@ -908,9 +908,14 @@ def get_features(x, camera_pos, geometry='plane', debug=[], extra_args=[None], f
     sin3 = tf.sin(ang3)
     cos3 = tf.cos(ang3)
 
-    ray_dir_p = [cos2 * cos3 * ray_dir[0] + (-cos1 * sin3 + sin1 * sin2 * cos3) * ray_dir[1] + (sin1 * sin3 + cos1 * sin2 * cos3) * ray_dir[2],
-                 cos2 * sin3 * ray_dir[0] + (cos1 * cos3 + sin1 * sin2 * sin3) * ray_dir[1] + (-sin1 * cos3 + cos1 * sin2 * sin3) * ray_dir[2],
-                 -sin2 * ray_dir[0] + sin1 * cos2 * ray_dir[1] + cos1 * cos2 * ray_dir[2]]
+    if 'seperable' in fov:
+        ray_dir_p = [(sin1 * sin3 + cos1 * sin2 * cos3) * ray_dir[0] + (-cos1 * sin3 + sin1 * sin2 * cos3) * ray_dir[1] + cos2 * cos3 * ray_dir[2],
+                     (-sin1 * cos3 + cos1 * sin2 * sin3) * ray_dir[0] + (cos1 * cos3 + sin1 * sin2 * sin3) * ray_dir[1] + cos2 * sin3 * ray_dir[2],
+                     cos1 * cos2 * ray_dir[0] + sin1 * cos2 * ray_dir[1] + -sin2 * ray_dir[2]]
+    else:
+        ray_dir_p = [cos2 * cos3 * ray_dir[0] + (-cos1 * sin3 + sin1 * sin2 * cos3) * ray_dir[1] + (sin1 * sin3 + cos1 * sin2 * cos3) * ray_dir[2],
+                     cos2 * sin3 * ray_dir[0] + (cos1 * cos3 + sin1 * sin2 * sin3) * ray_dir[1] + (-sin1 * cos3 + cos1 * sin2 * sin3) * ray_dir[2],
+                     -sin2 * ray_dir[0] + sin1 * cos2 * ray_dir[1] + cos1 * cos2 * ray_dir[2]]
 
     N = [0, 0, 1.0]
 
