@@ -2967,7 +2967,7 @@ def main_network(args):
             return d_network
         
         
-        if args.is_train:
+        if args.is_train or args.collect_validate_loss:
             if args.train_temporal_seq:
                 input_color = input_labels
             else:
@@ -3251,7 +3251,7 @@ def main_network(args):
         
         gen_saver = tf.train.Saver(gen_tvars, max_to_keep=1000)
         
-        if args.is_train:
+        if args.is_train or args.collect_validate_loss:
             savers = [gen_saver, discrim_saver]
             save_names = ['model_gen', 'model_discrim']
         else:
