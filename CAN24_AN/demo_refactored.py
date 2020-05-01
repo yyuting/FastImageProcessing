@@ -3464,6 +3464,10 @@ def main_network(args):
 
     if args.analyze_channel:
         g_channel = tf.abs(tf.gradients(loss_l2, sparsity_vec, stop_gradients=tf.trainable_variables())[0])
+        
+        feature_map_grad = tf.gradients(loss_l2, debug_input, stop_gradients=tf.trainable_variables())[0]
+        feature_map_taylor = tf.reduce_mean(tf.abs(tf.reduce_mean(feature_map_grad * debug_input, (1, 2))), 0)
+        
         # use 3 metrics
         # distance go gt (good example)
         # distance to RGB+aux result (bad example)
@@ -3477,13 +3481,16 @@ def main_network(args):
                 bad_dir = os.path.join(args.bad_example_base_dir, 'test')
 
         g_current = np.zeros(args.input_nc)
+        
+        taylor_exp_vals = np.zeros(args.input_nc)
+        
         feed_dict = {}
         current_dir = 'train' if args.test_training else 'test'
         current_dir = os.path.join(args.name, current_dir)
         if args.tile_only:
             if inference_entire_img_valid:
-                feed_dict[h_start] = np.array([- padding_offset / 2])
-                feed_dict[w_start] = np.array([- padding_offset / 2])
+                feed_dict[h_start] = np.array([- padding_offset // 2]).astype('i')
+                feed_dict[w_start] = np.array([- padding_offset // 2]).astype('i')
                 
         if os.path.isdir(current_dir):
             render_current = False
@@ -3492,8 +3499,8 @@ def main_network(args):
             render_current = True
         for i in range(len(val_img_names)):
             print(i)
+            output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
             if not args.analyze_current_only:
-                output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
                 bad_example = np.expand_dims(read_name(os.path.join(bad_dir, '%06d.png' % (i+1)), False, False), 0)
             camera_val = np.expand_dims(camera_pos_vals[i, :], axis=1)
             if not args.use_queue:
@@ -3501,8 +3508,8 @@ def main_network(args):
                 feed_dict[shader_time] = time_vals[i:i+1]
             
             if not inference_entire_img_valid:
-                feed_dict[h_start] = tile_start_vals[i:i+1, 0] - padding_offset / 2
-                feed_dict[w_start] = tile_start_vals[i:i+1, 1] - padding_offset / 2
+                feed_dict[h_start] = tile_start_vals[i:i+1, 0] - padding_offset // 2
+                feed_dict[w_start] = tile_start_vals[i:i+1, 1] - padding_offset // 2
             
             if render_current:
                 current_output = sess.run(network, feed_dict=feed_dict)
@@ -3514,8 +3521,13 @@ def main_network(args):
                 g_good += sess.run(g_channel, feed_dict=feed_dict)
                 feed_dict[output_pl] = bad_example
                 g_bad += sess.run(g_channel, feed_dict=feed_dict)
+            
             feed_dict[output_pl] = current_output
             g_current += sess.run(g_channel, feed_dict=feed_dict)
+            
+            feed_dict[output_pl] = output_ground
+            taylor_exp_vals += sess.run(feature_map_taylor, feed_dict=feed_dict)
+        
         if not args.analyze_current_only:
             g_good /= len(val_img_names)
             g_bad /= len(val_img_names)
@@ -3524,6 +3536,9 @@ def main_network(args):
 
         g_current /= len(val_img_names)
         numpy.save(os.path.join(current_dir, 'g_current.npy'), g_current)
+        
+        taylor_exp_vals /= len(val_img_names)
+        numpy.save(os.path.join(current_dir, 'taylor_exp_vals.npy'), taylor_exp_vals)
 
         logbins = np.logspace(-7, np.log10(np.max(np.abs(g_current))), 11)
         logbins[0] = 0
