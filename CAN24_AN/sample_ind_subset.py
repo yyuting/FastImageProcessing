@@ -12,10 +12,10 @@ def main():
     
     score = np.load(score_file)
     col_aux_inds = np.load(col_aux_inds_file)
-    
-    sample_budget = int((score.shape[0] * sample_portion))
-    
+        
     if mode in ['highest_score', 'lowest_score']:
+        
+        sample_budget = int((score.shape[0] * sample_portion))
         
         sampled_ind = col_aux_inds.tolist()
         
@@ -30,6 +30,37 @@ def main():
             
             if len(sampled_ind) == sample_budget:
                 break
+                
+    elif mode in ['highest_subsample', 'lowest_subsample']:
+        
+        sampled_ind = col_aux_inds.tolist()
+        
+        sample_portion = int(sample_portion)
+        
+        ind = 0
+        
+        remaining_inds = np.arange(score.shape[0])
+        col_aux_inds = np.sort(col_aux_inds)[::-1]
+        
+        for ind in col_aux_inds:
+            remaining_inds = np.concatenate((remaining_inds[:ind], remaining_inds[ind+1:]))
+            
+        for i in range(0, remaining_inds.shape[0], sample_portion):
+            start_i = i
+            end_i = min(i + sample_portion, remaining_inds.shape[0])
+            
+            all_inds = remaining_inds[start_i:end_i]
+            
+            if mode == 'highest_subsample':
+                chosen_i = i + np.argmax(score[all_inds])
+            else:
+                chosen_i = i + np.argmin(score[all_inds])
+                
+            chosen_ind = remaining_inds[chosen_i]
+            sampled_ind.append(chosen_ind)
+            
+    else:
+        raise
                 
     _, score_shortname = os.path.split(score_file)
                 
