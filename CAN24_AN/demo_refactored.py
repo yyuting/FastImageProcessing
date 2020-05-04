@@ -1655,7 +1655,6 @@ def generate_parser():
     parser.set_defaults(collect_validate_loss=False)
     parser.set_defaults(read_from_best_validation=False)
     parser.set_defaults(get_col_aux_inds=False)
-    parser.set_defaults(specified_ind=False)
     
     return parser
 
