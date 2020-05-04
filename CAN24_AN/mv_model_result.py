@@ -25,8 +25,8 @@ def main():
         except:
             pass
         
-        if file.startswith('model') or file.startswith('checkpoint'):
-            can_copy = False
+        #if file.startswith('model') or file.startswith('checkpoint'):
+        #    can_copy = False
             
         if file == '__pycache__':
             can_copy = False
