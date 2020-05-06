@@ -31,7 +31,9 @@ def main():
             if len(sampled_ind) == sample_budget:
                 break
                 
-    elif mode in ['highest_subsample', 'lowest_subsample']:
+    elif mode in ['highest_subsample', 'lowest_subsample', 'subsample']:
+        
+        
         
         sampled_ind = col_aux_inds.tolist()
         
@@ -53,8 +55,11 @@ def main():
             
             if mode == 'highest_subsample':
                 chosen_i = i + np.argmax(score[all_inds])
-            else:
+            elif mode == 'lowest_subsample':
                 chosen_i = i + np.argmin(score[all_inds])
+            else:
+                # using stratified subsample
+                chosen_i = np.random.randint(start_i, high=end_i)
                 
             chosen_ind = remaining_inds[chosen_i]
             sampled_ind.append(chosen_ind)
