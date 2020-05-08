@@ -568,7 +568,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                     # return early to avoid further clipping
                     return features
 
-            if not relax_clipping:
+            if (not relax_clipping) or (output_type in ['rgb', 'bgr']):
                 features_clipped = tf.clip_by_value(features, 0.0, 1.0)
                 features = features_clipped
             else:
