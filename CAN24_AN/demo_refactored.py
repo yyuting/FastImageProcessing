@@ -4041,10 +4041,12 @@ def main_network(args):
         
     if not args.is_train:
         if args.collect_validate_loss:
-            assert not args.test_training
+            assert args.test_training
             dirs = sorted(os.listdir(args.name))
             camera_pos_vals = np.load(os.path.join(args.dataroot, 'validate.npy'))
             time_vals = np.load(os.path.join(args.dataroot, 'validate_time.npy'))
+            if args.tile_only:
+                tile_start_vals = np.load(os.path.join(args.dataroot, 'validate_start.npy'))
             
             validate_imgs = []
             
@@ -4083,9 +4085,14 @@ def main_network(args):
                 for ind in range(len(validate_img_names)):
                     feed_dict = {camera_pos: np.expand_dims(camera_pos_vals[ind], 1),
                                  shader_time: time_vals[ind:ind+1],
-                                 output_pl: validate_imgs[ind],
-                                 h_start: np.array([- padding_offset / 2]),
-                                 w_start: np.array([- padding_offset / 2])}
+                                 output_pl: validate_imgs[ind]}
+                    
+                    if args.tile_only:
+                        feed_dict[h_start] = tile_start_vals[ind:ind+1, 0] - padding_offset / 2
+                        feed_dict[w_start] = tile_start_vals[ind:ind+1, 1] - padding_offset / 2
+                    else:
+                        feed_dict[h_start] = np.array([- padding_offset / 2])
+                        feed_dict[w_start] = np.array([- padding_offset / 2])
                     
                     current, current_l2, current_perceptual, current_gen_loss_GAN, current_discrim_loss = sess.run([loss, loss_l2, perceptual_loss_add, gen_loss_GAN, discrim_loss], feed_dict=feed_dict)
                     all_example_vals[ind] = np.array([epoch, current, current_l2, current_perceptual, current_gen_loss_GAN, current_discrim_loss])
