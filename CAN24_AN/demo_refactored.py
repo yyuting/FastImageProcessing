@@ -120,6 +120,8 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             shader_args = ' render_marble_def_color ' + geometry + ' ripples '
         elif shader_name == 'mandelbulb':
             shader_args = ' render_mandelbulb ' + geometry + ' none'
+        elif shader_name == 'mandelbulb_slim':
+            shader_args = ' render_mandelbulb_slim ' + geometry + ' none'
         elif shader_name == 'mandelbulb_simplified_proxy':
             shader_args = ' render_mandelbulb_simplified_proxy ' + geometry + ' none'
         elif shader_name == 'wood':
@@ -454,7 +456,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                     if vec not in vec_output:
                         actual_ind = out_features.index(vec)
                         color_inds.append(actual_ind)
-                np.save(os.path.join(dataroot, 'col_aux_inds.npy'), color_inds)
+                np.save(os.path.join(name, 'col_aux_inds.npy'), color_inds)
                 return
                 
             if temporal_texture_buffer:
