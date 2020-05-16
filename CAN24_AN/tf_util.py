@@ -46,6 +46,13 @@ def new_mul(x, y):
     try:
         if (x.dtype == bool) and (y.dtype == bool):
             return tf.logical_and(x, y)
+        
+        if (x.dtype == bool):
+            x = tf.cast(x, y.dtype)
+        
+        if (y.dtype == bool):
+            y = tf.cast(y, x.dtype)
+        
     except:
         if x == True:
             return y
