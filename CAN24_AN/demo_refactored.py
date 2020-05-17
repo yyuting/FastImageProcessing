@@ -455,8 +455,9 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             if get_col_aux_inds:
                 for vec in manual_features:
                     if vec not in vec_output:
-                        actual_ind = out_features.index(vec)
-                        color_inds.append(actual_ind)
+                        if isinstance(vec, tf.Tensor):
+                            actual_ind = out_features.index(vec)
+                            color_inds.append(actual_ind)
                 np.save(os.path.join(name, 'col_aux_inds.npy'), color_inds)
                 return
                 
