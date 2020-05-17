@@ -122,6 +122,8 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             shader_args = ' render_mandelbulb ' + geometry + ' none'
         elif shader_name == 'mandelbulb_slim':
             shader_args = ' render_mandelbulb_slim ' + geometry + ' none'
+        elif shader_name == 'mandelbulb_slim_simplified_proxy':
+            shader_args = ' render_mandelbulb_slim_simplified_proxy ' + geometry + ' none'
         elif shader_name == 'mandelbulb_simplified_proxy':
             shader_args = ' render_mandelbulb_simplified_proxy ' + geometry + ' none'
         elif shader_name == 'wood':
