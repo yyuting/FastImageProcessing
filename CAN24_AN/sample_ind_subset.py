@@ -19,6 +19,9 @@ def main():
         
         sampled_ind = col_aux_inds.tolist()
         
+        if len(sampled_ind) >= sample_budget:
+            raise "RGBx length already larger than sample budget"
+        
         sorted_ind = np.argsort(score)
         if mode == 'highest_score':
             sorted_ind = sorted_ind[::-1]
