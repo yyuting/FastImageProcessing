@@ -100,6 +100,8 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             shader_args = ' render_sin_quadratic ' + geometry + ' ripples '
         elif shader_name == 'bricks':
             shader_args = ' render_bricks ' + geometry + ' none '
+        elif shader_name == 'bricks_normal_texture':
+            shader_args = ' render_bricks_normal_texture ' + geometry + ' none '
         elif shader_name in ['mandelbrot', 'mandelbrot_tile_radius']:
             if partial_trace >= 1.0:
                 shader_args = ' render_mandelbrot_tile_radius ' + geometry + ' none '
