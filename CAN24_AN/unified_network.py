@@ -69,6 +69,29 @@ all_shaders = [
     ('trippy_heart', 'plane', 'datas_trippy_subsample_2', {'every_nth': 2, 'fov': 'small', 'additional_features': False, 'ignore_last_n_scale': 7, 'include_noise_feature': True}), 
     ('primitives_wheel_only', 'none', 'datas_primitives', {'fov': 'small'})]
 
+all_shaders_aux = [
+    ('mandelbrot', 'plane', 'datas_mandelbrot', {'fov': 'small'}), 
+    ('mandelbulb', 'none', 'datas_mandelbulb', {'fov': 'small_seperable'}), 
+    ('trippy_heart', 'plane', 'datas_trippy_subsample_2', {'every_nth': 2, 'fov': 'small'}), 
+    ('primitives_wheel_only', 'none', 'datas_primitives', {'fov': 'small'})]
+
+def smart_mkdir(dir):
+    if os.path.isdir(dir):
+        print('dir already exists', dir)
+        return
+    
+    parent, _ = os.path.split(dir)
+    parent_stack = []
+    
+    while not os.path.isdir(parent):
+        parent_stack.append(parent)
+        parent, _ = os.path.split(parent)
+        
+    for pa in parent_stack[::-1]:
+        os.mkdir(pa)
+   
+    os.mkdir(dir)
+
 
 def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', color_inds=[], manual_features_only=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, first_n=-1, first_n_no_last=-1, mean_var_only=False, zero_samples=False, render_fix_spatial_sample=False, render_zero_spatial_sample=False, spatial_samples=None, every_nth=-1, every_nth_stratified=False, additional_features=True, ignore_last_n_scale=0, include_noise_feature=False, no_noise_feature=False, relax_clipping=False, render_sigma=None, same_sample_all_pix=False, texture_maps=[], use_dataroot=True, automatic_subsample=False, automate_raymarching_def=False, log_only_return_def_raymarching=True, debug=[], SELECT_FEATURE_THRE=200, compiler_problem_idx=-1, feature_normalize_lo_pct=20, get_col_aux_inds=False, specified_ind=None, write_file=True, alt_dir=''):
     # 2x_1sample on margo
@@ -1476,10 +1499,18 @@ def main_network(args):
         global_epoch = args.epoch
     else:
         global_epoch = 1
+        
+    if args.manual_features_only:
+        global all_shaders, all_shaders_aux
+        all_shaders = all_shaders_aux
+        
+    all_train_writers = [None] * len(all_shaders)
     
     T0 = time.time()
     
     for global_e in range(args.which_epoch + 1, global_epoch + 1):
+        
+        print(global_e)
     
         for shader_ind in range(len(all_shaders)):
 
@@ -2083,7 +2114,7 @@ def main_network(args):
                 gen_saver = tf.train.Saver(generator_vars, max_to_keep=1000)
 
                 savers = [encoder_saver, gen_saver]
-                save_names = ['model_gen', '%s_encoder' % args.shader_name]
+                save_names = ['%s_encoder' % args.shader_name, 'model_gen']
 
 
 
@@ -2092,10 +2123,6 @@ def main_network(args):
             sess.run(tf.local_variables_initializer())
             #print("initialize global vars")
             sess.run(tf.global_variables_initializer())
-
-            exclude_prefix = 'feature_reduction'
-
-            var_all = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
 
             read_from_epoch = False
 
@@ -2114,14 +2141,16 @@ def main_network(args):
                 
                 else:
                     
-                    if not args.is_train and args.which_epoch > 0:
+                    if not args.is_train:
+                        # in this version we do not save models to root directory anymore
+                        assert args.which_epoch > 0
                         encoder_epoch = args.which_epoch
                         others_epoch = args.which_epoch
                         read_from_epoch = True
                     else:
                         encoder_epoch = global_e - 1
 
-                        if shader_idx == 0:
+                        if shader_ind == 0:
                             others_epoch = global_e - 1
                         else:
                             others_epoch = global_e
@@ -2143,19 +2172,19 @@ def main_network(args):
                                 
                     if not other_saver_exist:
                         assert not read_from_epoch
-                        assert global_e == 1 and shader_idx == 0
+                        assert global_e == 1 and shader_ind == 0
                     
                     if not encoder_saver_exist:
                         assert not read_from_epoch
                         assert global_e == 1
                     
 
-                if None not in ckpts:
-                    for c_i in range(len(ckpts)):
+                for c_i in range(len(ckpts)):
+                    if ckpts[c_i] is not None:
                         ckpt = ckpts[c_i]
                         print('loaded '+ ckpt.model_checkpoint_path)
                         savers[c_i].restore(sess, ckpt.model_checkpoint_path)
-                    print('finished loading')
+                print('finished loading')
 
 
 
@@ -2338,7 +2367,8 @@ def main_network(args):
 
             if args.is_train:
                 if args.write_summary:
-                    train_writer = tf.summary.FileWriter(args.name, sess.graph)
+                    if all_train_writers[shader_ind] is None:
+                        all_train_writers[shader_ind] = tf.summary.FileWriter(os.path.join(args.name, args.shader_name), sess.graph)
 
 
                 rec_arr_len = time_vals.shape[0]
@@ -2353,7 +2383,7 @@ def main_network(args):
 
                 min_avg_loss = 1e20
                 old_val_loss = 1e20
-
+                
 
                 for epoch in range(1, num_epoch+1):
 
@@ -2382,11 +2412,11 @@ def main_network(args):
                             feed_dict[step_count] = total_step_count
                             total_step_count += 1
 
+                        T_before = time.time()
+                            
                         if not args.preload:
-                            #if args.tile_only:
-                            #    output_arr = np.empty([args.batch_size, args.tiled_h, args.tiled_w, 3])
-                            #else:
-                            #    output_arr = np.empty([args.batch_size, args.input_h, args.input_w, 3])
+                            
+
                             output_arr = np.empty([args.batch_size, output_pl_h, output_pl_w, 3])
 
                             for img_idx in range(frame_idx.shape[0]):
@@ -2396,11 +2426,15 @@ def main_network(args):
                                 additional_arr = np.empty([args.batch_size, output_pl.shape[1].value, output_pl.shape[2].value, 1])
                                 for img_idx in range(frame_idx.shape[0]):
                                     additional_arr[img_idx, :, :, 0] = read_name(add_names[frame_idx[img_idx]], True)
+                                    
+                            
 
                         else:
                             output_arr = output_images[frame_idx]
                             if args.additional_input:
                                 additional_arr = all_adds[frame_idx]
+                                
+                        T_load = time.time() - T_before
 
                         if args.tiled_training:
                             # TODO: finish logic when batch_size > 1
@@ -2465,7 +2499,7 @@ def main_network(args):
                         all_gen_gan_loss[current_slice] = current_gen_loss_GAN
                         all_discrim_loss[current_slice] = current_discrim_loss
                         cnt += args.batch_size if args.use_batch else 1
-                        print("%d %d %.5f %.5f %.2f %.2f %s %d"%(epoch,cnt,current,np.mean(all[np.where(all)]),time.time()-st, st2-st1,os.getcwd().split('/')[-2], current_slice[0]))
+                        print("%d %d %.5f %.5f %.2f %.2f %.2f"%((global_e - 1) * num_epoch + epoch, cnt, current, np.mean(all[np.where(all)]), time.time()-st, st2-st1, T_load))
 
                     avg_loss = np.mean(all[np.where(all)])
                     avg_loss_l2 = np.mean(all_l2[np.where(all_l2)])
@@ -2485,16 +2519,16 @@ def main_network(args):
                         summary.value.add(tag='avg_perceptual', simple_value=avg_perceptual)
                         summary.value.add(tag='avg_gen_gan', simple_value=avg_gen_gan)
                         summary.value.add(tag='avg_discrim', simple_value=avg_discrim)
-                        train_writer.add_summary(summary, epoch)
+                        all_train_writers[shader_ind].add_summary(summary, (global_e - 1) * num_epoch + epoch)
 
-                    os.makedirs("%s/%04d"%(args.name,epoch))
-                    target=open("%s/%04d/score.txt"%(args.name,epoch),'w')
+                    smart_mkdir("%s/%04d/%04d/%s"%(args.name, global_e, epoch, args.shader_name))
+                    target=open("%s/%04d/%04d/%s/score.txt"%(args.name, global_e, epoch, args.shader_name),'w')
                     target.write("%f"%np.mean(all[np.where(all)]))
                     target.close()
 
-                if epoch % args.save_frequency == 0:
+                if global_e % args.save_frequency == 0:
                     for s_i in range(len(savers)):
-                        ckpt_dir = os.path.join("%s/%04d"%(args.name,epoch), save_names[s_i])
+                        ckpt_dir = os.path.join("%s/%04d"%(args.name, global_e), save_names[s_i])
                         if not os.path.isdir(ckpt_dir):
                             os.makedirs(ckpt_dir)
                         savers[s_i].save(sess,"%s/model.ckpt" % ckpt_dir)
@@ -2528,7 +2562,7 @@ def main_network(args):
                     for dir in dirs:
                         success = False
                         try:
-                            epoch = int(dir)
+                            global_e = int(dir)
                             success = True
                         except:
                             pass
@@ -2561,12 +2595,12 @@ def main_network(args):
                                 feed_dict[w_start] = np.array([- padding_offset / 2])
 
                             current, current_l2, current_perceptual, current_gen_loss_GAN, current_discrim_loss = sess.run([loss, loss_l2, perceptual_loss_add, gen_loss_GAN, discrim_loss], feed_dict=feed_dict)
-                            all_example_vals[ind] = np.array([epoch, current, current_l2, current_perceptual, current_gen_loss_GAN, current_discrim_loss])
+                            all_example_vals[ind] = np.array([global_e, current, current_l2, current_perceptual, current_gen_loss_GAN, current_discrim_loss])
 
                         all_vals.append(np.mean(all_example_vals, 0))
 
                     all_vals = np.array(all_vals)
-                    np.save(os.path.join(args.name, 'validation.npy'), all_vals)
+                    np.save(os.path.join(args.name, '%s_validation.npy' % args.shader_name), all_vals)
                     open(os.path.join(args.name, 'validation.txt'), 'w').write('validation dataset: %s\n raw data stored in: %s\n' % (args.dataroot, os.uname().nodename))
 
                     min_idx = np.argsort(all_vals[:, 1])
@@ -2583,7 +2617,7 @@ def main_network(args):
                             shutil.rmtree(os.path.abspath(saver_dir))
                         shutil.copytree(os.path.join(args.name, '%04d' % (int(min_epoch)), save_names[c_i]), saver_dir)
 
-                    open(os.path.join(args.name, 'best_val_epoch.txt'), 'w').write(str(int(min_epoch)))
+                    open(os.path.join(args.name, '%s_best_val_epoch.txt' % args.shader_name), 'w').write(str(int(min_epoch)))
 
                     figure = plt.figure(figsize=(20,10))
 
@@ -2607,7 +2641,7 @@ def main_network(args):
                     plt.plot(all_vals[:, 0], all_vals[:, 5])
                     plt.ylabel('GAN discrim loss')
 
-                    plt.savefig(os.path.join(args.name, 'validation.png'))
+                    plt.savefig(os.path.join(args.name, '%s_validation.png' % args.shader_name))
                     plt.close(figure)
 
                 else:
@@ -2636,6 +2670,8 @@ def main_network(args):
 
                     if read_from_epoch:
                         debug_dir += "_epoch_%04d"%args.which_epoch
+                        
+                    debug_dir = args.shader_name + '_' + debug_dir
 
                     if not os.path.isdir(debug_dir):
                         os.makedirs(debug_dir)
