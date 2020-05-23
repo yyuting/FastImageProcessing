@@ -1432,36 +1432,7 @@ def main_network(args):
             
     
     
-    def feature_reduction_layer(input_to_network, _replace_normalize_weights=None, shadername=''):
-        with tf.variable_scope("feature_reduction" + shadername, reuse=tf.AUTO_REUSE):
-
-            actual_nfeatures = args.input_nc
-            
-            if args.feature_reduction_ch > 0:
-                actual_feature_reduction_ch = args.feature_reduction_ch
-            else:
-                actual_feature_reduction_ch = args.initial_layer_channels
-
-            w_shape = [1, 1, actual_nfeatures, actual_feature_reduction_ch]
-            conv = tf.nn.conv2d
-            strides = [1, 1, 1, 1]
-            
-            weights = tf.get_variable('w0', w_shape, initializer=tf.contrib.layers.xavier_initializer() if not args.identity_initialize else identity_initializer(color_inds, ndims=2))
-
-            weights_to_input = weights
-
-            reduced_feat = conv(input_to_network, weights_to_input, strides, "SAME")
-
-            if args.initial_layer_channels <= actual_conv_channel:
-                ini_id = True
-            else:
-                ini_id = False
-                
-            if args.add_initial_layers:
-                for nlayer in range(3):
-                    reduced_feat = slim.conv2d(reduced_feat, actual_initial_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(allow_map_to_less=True), scope='initial_'+str(nlayer), padding=conv_padding)          
-            
-        return reduced_feat
+    
     
     avg_loss = 0
     tf.summary.scalar('avg_loss', avg_loss)
@@ -1573,6 +1544,37 @@ def main_network(args):
                 time_vals = np.load(os.path.join(args.dataroot, 'test_time.npy'))
 
             nexamples = time_vals.shape[0]
+            
+            def feature_reduction_layer(input_to_network, _replace_normalize_weights=None, shadername=''):
+                with tf.variable_scope("feature_reduction" + shadername, reuse=tf.AUTO_REUSE):
+
+                    actual_nfeatures = args.input_nc
+
+                    if args.feature_reduction_ch > 0:
+                        actual_feature_reduction_ch = args.feature_reduction_ch
+                    else:
+                        actual_feature_reduction_ch = args.initial_layer_channels
+
+                    w_shape = [1, 1, actual_nfeatures, actual_feature_reduction_ch]
+                    conv = tf.nn.conv2d
+                    strides = [1, 1, 1, 1]
+
+                    weights = tf.get_variable('w0', w_shape, initializer=tf.contrib.layers.xavier_initializer() if not args.identity_initialize else identity_initializer(color_inds, ndims=2))
+
+                    weights_to_input = weights
+
+                    reduced_feat = conv(input_to_network, weights_to_input, strides, "SAME")
+
+                    if args.initial_layer_channels <= actual_conv_channel:
+                        ini_id = True
+                    else:
+                        ini_id = False
+
+                    if args.add_initial_layers:
+                        for nlayer in range(3):
+                            reduced_feat = slim.conv2d(reduced_feat, actual_initial_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(allow_map_to_less=True), scope='initial_'+str(nlayer), padding=conv_padding)          
+
+                return reduced_feat
 
             with tf.variable_scope("shader"):
                 output_type = 'remove_constant'
