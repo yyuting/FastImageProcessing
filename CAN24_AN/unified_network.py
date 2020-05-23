@@ -1190,6 +1190,7 @@ def generate_parser():
     parser.add_argument('--no_overwrite_option_file', dest='overwrite_option_file', action='store_false', help='if specified, do not overwrite option file even if the old one is outdated')
     parser.add_argument('--dataroot_parent', dest='dataroot_parent', default='', help='specifies the parent directory for all dataroot dirs')
     parser.add_argument('--epoch_per_shader', dest='epoch_per_shader', type=int, default=1, help='number of epochs run per shader')
+    parser.add_argument('--multiple_feature_reduction_ch', dest='multiple_feature_reduction_ch', default='', help='specifies different feature reduction ch for different shader')
     
     parser.set_defaults(is_train=False)
     parser.set_defaults(use_batch=False)
@@ -1506,6 +1507,12 @@ def main_network(args):
         
     all_train_writers = [None] * len(all_shaders)
     
+    if args.multiple_feature_reduction_ch != '':
+        multiple_feature_reduction_ch = [int(val) for val in args.multiple_feature_reduction_ch.split(',')]
+        assert len(multiple_feature_reduction_ch) == len(all_shaders)
+    else:
+        multiple_feature_reduction_ch = None
+    
     T0 = time.time()
     
     for global_e in range(args.which_epoch + 1, global_epoch + 1):
@@ -1530,6 +1537,9 @@ def main_network(args):
 
             for key in extra_args.keys():
                 setattr(args, key, extra_args[key])
+                
+            if multiple_feature_reduction_ch is not None:
+                args.feature_reduction_ch = multiple_feature_reduction_ch[shader_ind]
 
             output_names, val_img_names, map_names, val_map_names, grad_names, val_grad_names, add_names, val_add_names, validate_img_names = prepare_data_root(args.dataroot, additional_input=args.additional_input)
             if args.test_training:
