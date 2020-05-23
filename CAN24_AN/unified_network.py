@@ -261,22 +261,6 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
     spec = importlib.util.spec_from_file_location("module.name", compiler_problem_full_name)
     compiler_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(compiler_module)
-
-    #Q1 = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/Q1.npy')
-    #Q3 = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/Q3.npy')
-    #IQR = np.load('/localtmp/yuting/out_2x1_manual_carft/train/zigzag_plane_normal_spheres/IQR.npy')
-
-    # 1x_1sample on minion
-    #camera_pos = np.load('/localtmp/yuting/out_1x1_manual_craft/out_1x1_manual_craft/train.npy')[0, :]
-
-    #feature_scale = np.load('/localtmp/yuting/out_1x1_manual_craft/out_1x1_manual_craft/train/zigzag_plane_normal_spheres/feature_scale.npy')
-    #feature_bias = np.load('/localtmp/yuting/out_1x1_manual_craft/out_1x1_manual_craft/train/zigzag_plane_normal_spheres/feature_bias.npy')
-    #global width
-    #width = 960
-    #global height
-    #height = 640
-
-    #samples = [all_features[-2, :, :], all_features[-1, :, :]]
     
     texture_map_size = []
     
@@ -1321,15 +1305,6 @@ def main_network(args):
                     updated_keys.append(key)
             for key in updated_keys:
                 delattr(option_copy, key)
-            for key in deprecated_options:
-                if key in option_str:
-                    idx = option_str.index(key)
-                    try:
-                        next_sep = option_str.index(',', idx)
-                    except ValueError:
-                        next_sep = option_str.index(')', idx) - 2
-                        idx -= 2
-                    option_str = option_str.replace(option_str[idx:next_sep+2], '')
             assert option_str == str(option_copy)
             option_copy = copy_option(args)
             if args.overwrite_option_file:
@@ -1519,7 +1494,7 @@ def main_network(args):
                 val_grad_names = grad_names
                 val_add_names = add_names
 
-            camera_pos = tf.placeholder(dtype, shape=[args.batch_size, args.batch_size])
+            camera_pos = tf.placeholder(dtype, shape=[6, args.batch_size])
             shader_time = tf.placeholder(dtype, shape=args.batch_size)
             output_pl = tf.placeholder(tf.float32, shape=[None, output_pl_h, output_pl_w, 3])
 
@@ -2138,7 +2113,7 @@ def main_network(args):
 
             read_from_epoch = False
 
-            if not (args.debug_mode and args.mean_estimator):
+            if (not (args.debug_mode and args.mean_estimator)) and (not args.collect_validate_loss):
 
                 ckpts = [None] * len(savers)
 
@@ -2570,6 +2545,9 @@ def main_network(args):
                     all_vals = []
 
                     all_example_vals = np.empty([len(validate_img_names), 6])
+                    
+                    # DOGE: debug only
+                    count = 0
 
                     for dir in dirs:
                         success = False
@@ -2610,27 +2588,21 @@ def main_network(args):
                             all_example_vals[ind] = np.array([global_e, current, current_l2, current_perceptual, current_gen_loss_GAN, current_discrim_loss])
 
                         all_vals.append(np.mean(all_example_vals, 0))
+                        
+                        # DOGE: debug only
+                        count += 1
+                        if count > 2:
+                            break
 
                     all_vals = np.array(all_vals)
                     np.save(os.path.join(args.name, '%s_validation.npy' % args.shader_name), all_vals)
                     open(os.path.join(args.name, 'validation.txt'), 'w').write('validation dataset: %s\n raw data stored in: %s\n' % (args.dataroot, os.uname().nodename))
-
+                    
                     min_idx = np.argsort(all_vals[:, 1])
                     min_epoch = all_vals[min_idx[0], 0]
-
-                    val_dir = os.path.join(args.name, 'best_val')
-                    if os.path.isdir(val_dir):
-                        shutil.rmtree(val_dir)
-                    os.mkdir(val_dir)
-
-                    for c_i in range(len(savers)):
-                        saver_dir = os.path.join(val_dir, save_names[c_i])
-                        if os.path.isdir(saver_dir):
-                            shutil.rmtree(os.path.abspath(saver_dir))
-                        shutil.copytree(os.path.join(args.name, '%04d' % (int(min_epoch)), save_names[c_i]), saver_dir)
-
+                    
                     open(os.path.join(args.name, '%s_best_val_epoch.txt' % args.shader_name), 'w').write(str(int(min_epoch)))
-
+                    
                     figure = plt.figure(figsize=(20,10))
 
                     plt.subplot(5, 1, 1)
@@ -3139,6 +3111,36 @@ def main_network(args):
             T0 = time.time()
 
             sess.close()
+    
+    if orig_args.collect_validate_loss:
+        # need to aggregate validation across multiple shaders
+        
+        all_shader_validations = []
+        
+        for shader_ind in range(len(all_shaders)):
+            shader_name = all_shaders[shader_ind][0]
+            all_vals = np.load(os.path.join(orig_args.name, '%s_validation.npy' % shader_name))
+            all_shader_validations.append(all_vals)
+            
+        all_shader_validations = np.array(all_shader_validations)
+        
+        # per shader min error across all epochs
+        min_err = np.min(all_shader_validations, 1)
+        min_err = np.expand_dims(min_err, 1)
+        
+        normalized_validations = all_shader_validations / min_err
+        accumulated_validations = np.sum(all_shader_validations, 0)
+        
+        min_idx = np.argsort(accumulated_validations[:, 1])
+        min_epoch = all_shader_validations[0, min_idx[0], 0]
+
+        val_dir = os.path.join(args.name, 'best_val')
+        if os.path.isdir(val_dir):
+            shutil.rmtree(val_dir)
+        
+        shutil.copytree(os.path.join(args.name, '%04d' % int(min_epoch)), val_dir)
+
+        open(os.path.join(args.name, 'avg_best_val_epoch.txt'), 'w').write(str(int(min_epoch)))
 
 if __name__ == '__main__':
     main()
