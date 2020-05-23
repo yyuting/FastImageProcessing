@@ -2655,7 +2655,7 @@ def main_network(args):
                     if read_from_epoch:
                         debug_dir += "_epoch_%04d"%args.which_epoch
                         
-                    debug_dir = args.shader_name + '_' + debug_dir
+                    debug_dir = debug_dir + '_' + args.shader_name
 
                     if not os.path.isdir(debug_dir):
                         os.makedirs(debug_dir)
@@ -2781,16 +2781,6 @@ def main_network(args):
             </html>""")
                         return
                     else:
-                        if args.analyze_nn_discontinuity:
-                            all_discontinuities = []
-                            all_ops = tf.get_default_graph().get_operations()
-                            all_generator_ops = [n for n in all_ops if n.name.startswith('generator/')]
-                            all_lrelu = [n for n in all_generator_ops if n.name.endswith('Maximum')]
-                            for node in all_lrelu:
-                                op = tf.get_default_graph().get_operation_by_name(node.name.replace('Maximum', 'BiasAdd'))
-                                assert len(op.outputs) == 1
-                                all_discontinuities.append(op.outputs[0])
-                            args.repeat_timing = 1
 
                         nexamples = time_vals.shape[0]
 
@@ -2801,8 +2791,6 @@ def main_network(args):
                         all_perceptual = np.zeros(nexamples, dtype=float)
                         python_time = numpy.zeros(nexamples)
 
-                        if args.learn_loss_proxy and (not args.proxy_loss_type == 'from_data'):
-                            all_loss_proxy = np.zeros((nexamples, 2), dtype=float)
                         if args.train_temporal_seq:
                             previous_buffer = np.empty([1, input_pl_h, input_pl_w, 6*(args.nframes_temporal_gen-1)])
 
@@ -2993,15 +2981,10 @@ def main_network(args):
                                         time_count += 1
                                     if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
                                         output_buffer += output_image[:, :, :, ::-1]
-                                    if args.learn_loss_proxy and (not args.proxy_loss_type == 'from_data'):
-                                        output_images.append(output_image)
-                                        l2_loss_vals += l2_loss_val
-                                        all_loss_proxy[i, k] = np.mean(output_image)
-                                    else:
-                                        output_images = [output_image]
+
+                                    output_images = [output_image]
                                 st2 = time.time()
-                                if args.learn_loss_proxy and (not args.proxy_loss_type == 'from_data'):
-                                    l2_loss_val = l2_loss_vals / nruns
+
                                 print("rough time estimate:", st_sum)
 
                                 if args.mean_estimator:
@@ -3034,13 +3017,7 @@ def main_network(args):
                             all_grad[i] = grad_loss_val
                             all_perceptual[i] = perceptual_loss_val
 
-                            if args.learn_loss_proxy:
-                                for k in range(len(output_images)):
-                                    output_image = output_images[k]
-                                    output_image=np.clip(output_image,0.0,1.0)
-                                    output_image *= 255.0
-                                    cv2.imwrite("%s/%06d%d.png"%(debug_dir, i+1, k),np.uint8(output_image[0,:,:,:]))
-                            elif output_image.shape[3] == 3:
+                            if output_image.shape[3] == 3:
                                 output_image=np.clip(output_image,0.0,1.0)
                                 output_image *= 255.0
                                 cv2.imwrite("%s/%06d.png"%(debug_dir, i+1),np.uint8(output_image[0,:,:,:]))
