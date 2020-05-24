@@ -2545,9 +2545,6 @@ def main_network(args):
                     all_vals = []
 
                     all_example_vals = np.empty([len(validate_img_names), 6])
-                    
-                    # DOGE: debug only
-                    count = 0
 
                     for dir in dirs:
                         success = False
@@ -2588,11 +2585,6 @@ def main_network(args):
                             all_example_vals[ind] = np.array([global_e, current, current_l2, current_perceptual, current_gen_loss_GAN, current_discrim_loss])
 
                         all_vals.append(np.mean(all_example_vals, 0))
-                        
-                        # DOGE: debug only
-                        count += 1
-                        if count > 2:
-                            break
 
                     all_vals = np.array(all_vals)
                     np.save(os.path.join(args.name, '%s_validation.npy' % args.shader_name), all_vals)
