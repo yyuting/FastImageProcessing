@@ -4110,7 +4110,7 @@ def main_network(args):
             # epoch, current, current_l2, current_perceptual, current_gen, current_discrim
             all_vals = []
                         
-            all_example_vals = np.empty([len(validate_img_names), 6])
+            all_example_vals = np.empty([time_vals.shape[0], 6])
                 
             for dir in dirs:
                 success = False
@@ -4134,6 +4134,10 @@ def main_network(args):
                         savers[c_i].restore(sess, ckpt.model_checkpoint_path)
                 else:
                     continue
+                    
+                # DOGE: debug only
+                if epoch > 2:
+                    break
                     
                 if args.use_queue:
                     sess.run(train_iterator)
