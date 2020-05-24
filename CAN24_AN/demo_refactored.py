@@ -1952,7 +1952,7 @@ def main_network(args):
         print('setting use_queue to False')
         
     if args.train_temporal_seq:
-        if args.is_train and not args.geometry.startswith('boids'):
+        if (args.is_train or args.collect_validate_loss) and not args.geometry.startswith('boids'):
             # only require queue for 2D case
             # can release this assertion if we complete the logic of using feed_dict
             assert args.use_queue
@@ -2098,7 +2098,9 @@ def main_network(args):
         # should generatlize the code if need to use the same pipeline on more shaders
         assert args.temporal_texture_buffer or args.train_temporal_seq
         #assert args.geometry == 'texture_approximate_10f'
-        if args.is_train or args.test_training:
+        if args.collect_validate_loss:
+            queue_dir_prefix = 'validate'
+        elif args.is_train or args.test_training:
             queue_dir_prefix = 'train'
         else:
             queue_dir_prefix = 'test'
@@ -2338,7 +2340,7 @@ def main_network(args):
         if args.mean_estimator and not args.mean_estimator_memory_efficient:
             shader_samples = args.estimator_samples
         elif args.train_temporal_seq:
-            if args.is_train:
+            if args.is_train or args.collect_validate_loss:
                 if not args.geometry.startswith('boids'):
                     shader_samples = ngts
                 else:
@@ -2708,7 +2710,7 @@ def main_network(args):
                 if not args.geometry.startswith('boids'):
                     # 2D case
                     assert args.add_initial_layers
-                    if args.is_train:
+                    if args.is_train or args.collect_validate_loss:
                         input_labels = []
                         generated_frames = []
                         current_input_ls = []
@@ -2881,7 +2883,7 @@ def main_network(args):
                 loss = tf.reduce_mean((generated_seq[0] - output[:, args.nframes_temporal_gen]) ** 2)
             else:
                 loss = tf.reduce_mean((network - output_pl) ** 2)
-        elif (not args.is_train) or (not args.train_temporal_seq):
+        elif ((not args.is_train) and (not args.collect_validate_loss)) or (not args.train_temporal_seq):
             if (not args.train_res) or (args.debug_mode and args.mean_estimator):
                 diff = network - output
             else:
@@ -2931,7 +2933,7 @@ def main_network(args):
     elif args.lpips_loss:
         sys.path += ['../../lpips-tensorflow']
         import lpips_tf
-        if args.train_temporal_seq and args.is_train:
+        if args.train_temporal_seq and (args.is_train or args.collect_validate_loss):
             loss_lpips = 0.0
             for i in range(len(generated_seq)):
                 start_ind = args.nframes_temporal_gen - 1 + i
