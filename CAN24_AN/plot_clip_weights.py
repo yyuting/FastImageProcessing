@@ -73,11 +73,19 @@ def compute_metric(dir1, dir2, mode, mask=None, thre=0):
         output = tf.placeholder(tf.float32, shape=[1, None, None, None])
         gradient = demo.image_gradients(output)
         sess = tf.Session()
+        
+    
 
     files1 = os.listdir(dir1)
     files2 = os.listdir(dir2)
     img_files1 = sorted([file for file in files1 if file.endswith('.png') or file.endswith('.jpg')])
     img_files2 = sorted([file for file in files2 if file.endswith('.png') or file.endswith('.jpg')])
+    
+    if '--prefix' in sys.argv:
+        prefix_idx = sys.argv.index('--prefix')
+        prefix = sys.argv[prefix_idx+1]
+        img_files2 = [file for file in img_files2 if file.startswith(prefix)]
+    
     if mask is not None:
         mask_files = []
         for dir in sorted(mask):
