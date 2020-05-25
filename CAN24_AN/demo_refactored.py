@@ -4137,10 +4137,6 @@ def main_network(args):
                 else:
                     continue
                     
-                # DOGE: debug only
-                if epoch > 2:
-                    break
-                    
                 if args.use_queue:
                     sess.run(train_iterator)
                                 
