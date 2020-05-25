@@ -13,19 +13,19 @@ slicing_datas = {
             '1x_1sample_mandelbrot_aux_largest_capacity',
             '1x_1sample_mandelbrot_all'
         ],
-        'good oracle': [
-            '1x_1sample_mandelbrot_highest_score_05',
-            '1x_1sample_mandelbrot_highest_score_025',
-            '1x_1sample_mandelbrot_highest_score_0125',
-            '1x_1sample_mandelbrot_highest_score_00625',
-            '1x_1sample_mandelbrot_highest_score_003125'
+        'good_oracle': [
+            '1x_1sample_mandelbrot_highest_score_05_new',
+            '1x_1sample_mandelbrot_highest_score_025_new',
+            '1x_1sample_mandelbrot_highest_score_0125_new',
+            '1x_1sample_mandelbrot_highest_score_00625_new',
+            '1x_1sample_mandelbrot_highest_score_003125_new'
         ],
         'bad_oracle': [
-            '1x_1sample_mandelbrot_lowest_score_05',
-            '1x_1sample_mandelbrot_lowest_score_025',
-            '1x_1sample_mandelbrot_lowest_score_0125',
-            '1x_1sample_mandelbrot_lowest_score_00625',
-            '1x_1sample_mandelbrot_lowest_score_003125'
+            '1x_1sample_mandelbrot_lowest_score_05_new',
+            '1x_1sample_mandelbrot_lowest_score_025_new',
+            '1x_1sample_mandelbrot_lowest_score_0125_new',
+            '1x_1sample_mandelbrot_lowest_score_00625_new',
+            '1x_1sample_mandelbrot_lowest_score_003125_new'
         ],
         'subsample': [
             '1x_1sample_mandelbrot_stratified_subsample_2',
@@ -41,20 +41,20 @@ slicing_datas = {
             '1x_1sample_trippy_subsample_2'
         ],
         'good_oracle': [
-            '1x_1sample_trippy_subsample_2_highest_score_05',
-            '1x_1sample_trippy_subsample_2_highest_score_025',
-            '1x_1sample_trippy_subsample_2_highest_score_0125',
-            '1x_1sample_trippy_subsample_2_highest_score_00625',
-            '1x_1sample_trippy_subsample_2_highest_score_003125',
-            '1x_1sample_trippy_highest_score_0015625'
+            '1x_1sample_trippy_subsample_2_highest_score_05_new',
+            '1x_1sample_trippy_subsample_2_highest_score_025_new',
+            '1x_1sample_trippy_subsample_2_highest_score_0125_new',
+            '1x_1sample_trippy_subsample_2_highest_score_00625_new',
+            '1x_1sample_trippy_subsample_2_highest_score_003125_new',
+            '1x_1sample_trippy_subsample_2_highest_score_0015625_new'
         ],
         'bad_oracle': [
-            '1x_1sample_trippy_subsample_2_lowest_score_05',
-            '1x_1sample_trippy_subsample_2_lowest_score_025',
-            '1x_1sample_trippy_subsample_2_lowest_score_0125',
-            '1x_1sample_trippy_subsample_2_lowest_score_00625',
-            '1x_1sample_trippy_subsample_2_lowest_score_003125',
-            '1x_1sample_trippy_lowest_score_0015625'
+            '1x_1sample_trippy_subsample_2_lowest_score_05_new',
+            '1x_1sample_trippy_subsample_2_lowest_score_025_new',
+            '1x_1sample_trippy_subsample_2_lowest_score_0125_new',
+            '1x_1sample_trippy_subsample_2_lowest_score_00625_new',
+            '1x_1sample_trippy_subsample_2_lowest_score_003125_new',
+            '1x_1sample_trippy_subsample_2_lowest_score_0015625_new'
         ],
         'subsample': [
             '1x_1sample_trippy_stratified_subsample_4',
@@ -65,50 +65,55 @@ slicing_datas = {
             '1x_1sample_trippy_stratified_subsample_128'
         ]
     },
-    'primitives': {
-        'baseline': [
-            '1x_1sample_primitives_aux_largest_capacity',
-            '1x_1sample_primitives_all'
-        ],
-        'good_oracle': [
-            '1x_1sample_primitives_highest_score_05',
-            '1x_1sample_primitives_highest_score_025',
-            '1x_1sample_primitives_highest_score_0125'
-        ],
-        'bad_oracle': [
-            '1x_1sample_primitives_lowest_score_05',
-            '1x_1sample_primitives_lowest_score_025',
-            '1x_1sample_primitives_lowest_score_0125'
-        ],
-        'subsample': [
-            '1x_1sample_primitives_subsample_2',
-            '1x_1sample_primitives_stratified_subsample_4',
-            '1x_1sample_primitives_stratified_subsample_8',
-            '1x_1sample_primitives_stratified_subsample_16'
-        ]
-    },
     'mandelbulb': {
         'baseline': [
             '1x_1sample_mandelbulb_aux_largest_capacity',
             '1x_1sample_mandelbulb_all'
         ],
         'good_oracle': [
-            '1x_1sample_mandelbulb_highest_score_05',
-            '1x_1sample_mandelbulb_highest_score_025',
-            '1x_1sample_mandelbulb_highest_score_0125',
-            '1x_1sample_mandelbulb_highest_score_00625'
+            '1x_1sample_mandelbulb_highest_score_05_new',
+            '1x_1sample_mandelbulb_highest_score_025_new',
+            '1x_1sample_mandelbulb_highest_score_0125_new',
+            '1x_1sample_mandelbulb_highest_score_00625_new'
         ],
         'bad_oracle': [
-            '1x_1sample_mandelbulb_lowest_score_05',
-            '1x_1sample_mandelbulb_lowest_score_025',
-            '1x_1sample_mandelbulb_lowest_score_0125',
-            '1x_1sample_mandelbulb_lowest_score_00625'
+            '1x_1sample_mandelbulb_lowest_score_05_new',
+            '1x_1sample_mandelbulb_lowest_score_025_new',
+            '1x_1sample_mandelbulb_lowest_score_0125_new',
+            '1x_1sample_mandelbulb_lowest_score_00625_new'
         ],
         'subsample': [
             '1x_1sample_mandelbulb_stratified_subsample_2',
             '1x_1sample_mandelbulb_stratified_subsample_4',
             '1x_1sample_mandelbulb_stratified_subsample_8',
             '1x_1sample_mandelbulb_stratified_subsample_16'
+        ]
+    },
+    'primitives': {
+        'baseline': [
+            '1x_1sample_primitives_aux_largest_capacity',
+            '1x_1sample_primitives_all'
+        ],
+        'good_oracle': [
+            '1x_1sample_primitives_highest_score_05_new',
+            '1x_1sample_primitives_highest_score_025_new',
+            '1x_1sample_primitives_highest_score_0125_new',
+            '1x_1sample_primitives_highest_score_00625_new',
+            '1x_1sample_primitives_highest_score_003125_new'
+        ],
+        'bad_oracle': [
+            '1x_1sample_primitives_lowest_score_05_new',
+            '1x_1sample_primitives_lowest_score_025_new',
+            '1x_1sample_primitives_lowest_score_0125_new',
+            '1x_1sample_primitives_lowest_score_00625_new',
+            '1x_1sample_primitives_lowest_score_003125_new'
+        ],
+        'subsample': [
+            '1x_1sample_primitives_subsample_2',
+            '1x_1sample_primitives_stratified_subsample_4',
+            '1x_1sample_primitives_stratified_subsample_8',
+            '1x_1sample_primitives_stratified_subsample_16',
+            '1x_1sample_primitives_stratified_subsample_32'
         ]
     }
 }
@@ -143,12 +148,45 @@ def main():
     
     fontsize = 14
     
+    # 0: good, subsample, bad
+    # 1: good, bad, subsample
+    # 2: subsample, good, bad
+    # 3: subsample, bad, good
+    # 4: bad, good, subsample
+    # 5: bad, subsample, good
+    relationships = []
+    for i in range(6):
+        if i == 0:
+            order = ['good', 'subsample', 'bad']
+        elif i == 1:
+            order = ['good', 'bad', 'subsample']
+        elif i == 2:
+            order = ['subsample', 'good', 'bad']
+        elif i == 3:
+            order = ['subsample', 'bad', 'good']
+        elif i == 4:
+            order = ['bad', 'good', 'subsample']
+        elif i == 5:
+            order = ['bad', 'subsample', 'good']
+            
+        relationships.append({'order': order, 'l2': {}, 'perceptual': {}})
+        
+    total_count = {'l2': 0, 'perceptual': 0}
+    
+    colors = {'subsample': colorsys.hsv_to_rgb(0, 1, 0.7),
+              'good_oracle': colorsys.hsv_to_rgb(0.25, 1, 0.7),
+              'bad_oracle': colorsys.hsv_to_rgb(0.5, 1, 0.7),
+              'RGBx': colorsys.hsv_to_rgb(0.75, 1, 0.7)}
+        
     for shader_name in slicing_datas.keys():
         shader_datas = slicing_datas[shader_name]
         
         all_plot_datas = {}
         
         rgbx_info = None
+        
+        if shader_name == 'mandelbulb':
+            shader_name = 'mandelbulb'
         
         for category in shader_datas.keys():
             
@@ -178,20 +216,29 @@ def main():
         
             fig = plt.figure()
             fig.set_size_inches(7, 3.5)
+            
+            comparisons = {}
 
             for category in all_plot_datas.keys():
 
                 current_perceptual = all_plot_datas[category][metric]
                 current_trace = all_plot_datas[category]['trace']
 
-                plt.plot(current_trace, current_perceptual, 'o', linewidth=10, markeredgewidth=10, label=category)
+                plt.plot(current_trace, current_perceptual, 'o', linewidth=10, markeredgewidth=10, label=category, color=colors[category])
 
                 current_perceptual = np.concatenate((current_perceptual, np.array([rgbx_info[metric]])))
                 current_trace = np.concatenate((current_trace, np.array([rgbx_info['trace']])))
 
-                plt.plot(current_trace, current_perceptual, linewidth=2.25)
+                plt.plot(current_trace, current_perceptual, linewidth=2.25, color=colors[category])
+                
+                if 'good' in category:
+                    comparisons['good'] = all_plot_datas[category][metric]
+                elif 'bad' in category:
+                    comparisons['bad'] = all_plot_datas[category][metric]
+                elif 'subsample' in category:
+                    comparisons['subsample'] = all_plot_datas[category][metric]
 
-            plt.plot([rgbx_info['trace']], [rgbx_info[metric]], 'o', linewidth=10, markeredgewidth=10, label='RGBx')
+            plt.plot([rgbx_info['trace']], [rgbx_info[metric]], 'o', linewidth=10, markeredgewidth=10, label='RGBx', color=colors['RGBx'])
 
             plt.xlabel('Trace Length used in Model', fontsize=fontsize)
             plt.ylabel('%s error' % metric, fontsize=fontsize)
@@ -201,8 +248,46 @@ def main():
 
             plt.savefig(os.path.join('result_figs', '%s_trace_contribution_%s.png' % (shader_name, metric)))
             plt.close(fig)
-        
+            
+            assert comparisons['good'].shape == comparisons['bad'].shape and comparisons['good'].shape == comparisons['subsample'].shape
+            
+            for i in range(len(relationships)):
+                order = relationships[i]['order']
+                
+                if 'accum' not in relationships[i][metric].keys():
+                    relationships[i][metric]['accum'] = 0
+                    
+                count = np.sum((comparisons[order[0]] <= comparisons[order[1]]) * (comparisons[order[1]] <= comparisons[order[2]]))
+                
+                relationships[i][metric]['accum'] = relationships[i][metric]['accum'] + count
+                relationships[i][metric][shader_name] = count
+                
+            total_count[metric] = total_count[metric] + comparisons['good'].shape[0]
+                        
         print(shader_name)
+       
+    assert total_count['l2'] == total_count['perceptual']
+    
+    summary_str = """
+Total data points: %d
+""" % (total_count['l2'])
+    
+    for metric in ['perceptual', 'l2']:
+        summary_str += """
+Statistic in %s error:
+""" % metric
+        for i in range(len(relationships)):
+            summary_str += """
+Datapoints with relationship %s < %s < %s: %d (%d%%)
+""" % (relationships[i]['order'][0], relationships[i]['order'][1], relationships[i]['order'][2], relationships[i][metric]['accum'], int(relationships[i][metric]['accum'] / total_count[metric] * 100))
+            
+            for shader_name in sorted(relationships[i][metric].keys()):
+                summary_str += '    '
+                if shader_name != 'accum':
+                    summary_str += '%s: %d' % (shader_name, relationships[i][metric][shader_name])
+            summary_str += '\n'
+    
+    open('result_figs/summary.txt', 'w').write(summary_str)
     
         
 if __name__ == '__main__':
