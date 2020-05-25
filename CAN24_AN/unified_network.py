@@ -1445,7 +1445,7 @@ def main_network(args):
     if args.is_train:
         global_epoch = args.epoch
     else:
-        global_epoch = 1
+        global_epoch = args.which_epoch + 1
         
     if args.manual_features_only:
         global all_shaders, all_shaders_aux
