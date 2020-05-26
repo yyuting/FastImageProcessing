@@ -63,11 +63,22 @@ less_aggresive_ini = False
 conv_padding = "SAME"
 padding_offset = 32
 
-all_shaders = [
-    ('mandelbrot', 'plane', 'datas_mandelbrot', {'fov': 'small', 'additional_features': False, 'ignore_last_n_scale': 7, 'include_noise_feature': True}), 
-    ('mandelbulb', 'none', 'datas_mandelbulb', {'fov': 'small_seperable'}), 
-    ('trippy_heart', 'plane', 'datas_trippy_subsample_2', {'every_nth': 2, 'fov': 'small', 'additional_features': False, 'ignore_last_n_scale': 7, 'include_noise_feature': True}), 
-    ('primitives_wheel_only', 'none', 'datas_primitives', {'fov': 'small'})]
+shaders_pool = [
+    [
+        ('mandelbrot', 'plane', 'datas_mandelbrot', {'fov': 'small', 'additional_features': False, 'ignore_last_n_scale': 7, 'include_noise_feature': True}), 
+        ('mandelbulb', 'none', 'datas_mandelbulb', {'fov': 'small_seperable'}), 
+        ('trippy_heart', 'plane', 'datas_trippy_subsample_2', {'every_nth': 2, 'fov': 'small', 'additional_features': False, 'ignore_last_n_scale': 7, 'include_noise_feature': True}), 
+        ('primitives_wheel_only', 'none', 'datas_primitives', {'fov': 'small'})
+    ],
+    [
+        ('mandelbrot', 'plane', 'datas_mandelbrot', {'fov': 'small', 'additional_features': False, 'ignore_last_n_scale': 7, 'include_noise_feature': True}), 
+        ('mandelbulb_slim', 'none', 'datas_mandelbulb', {'fov': 'small_seperable'}), 
+        ('trippy_heart', 'plane', 'datas_trippy_subsample_2', {'every_nth': 2, 'fov': 'small', 'additional_features': False, 'ignore_last_n_scale': 7, 'include_noise_feature': True}), 
+        ('primitives_wheel_only', 'none', 'datas_primitives', {'fov': 'small'})
+    ]
+]
+
+all_shaders = shaders_pool[0]
 
 all_shaders_aux = [
     ('mandelbrot', 'plane', 'datas_mandelbrot', {'fov': 'small'}), 
@@ -1175,6 +1186,7 @@ def generate_parser():
     parser.add_argument('--dataroot_parent', dest='dataroot_parent', default='', help='specifies the parent directory for all dataroot dirs')
     parser.add_argument('--epoch_per_shader', dest='epoch_per_shader', type=int, default=1, help='number of epochs run per shader')
     parser.add_argument('--multiple_feature_reduction_ch', dest='multiple_feature_reduction_ch', default='', help='specifies different feature reduction ch for different shader')
+    parser.add_argument('--choose_shaders', dest='choose_shaders', type=int, default=0, help='specifies which set of shaders to use')
     
     parser.set_defaults(is_train=False)
     parser.set_defaults(use_batch=False)
@@ -1450,6 +1462,10 @@ def main_network(args):
     if args.manual_features_only:
         global all_shaders, all_shaders_aux
         all_shaders = all_shaders_aux
+        
+    if args.choose_shaders > 0:
+        global all_shaders, shaders_pool
+        all_shaders = shaders_pool[args.choose_shaders]
         
     all_train_writers = [None] * len(all_shaders)
     
