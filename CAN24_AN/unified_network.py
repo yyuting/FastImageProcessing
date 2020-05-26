@@ -75,6 +75,12 @@ shaders_pool = [
         ('mandelbulb_slim', 'none', 'datas_mandelbulb', {'fov': 'small_seperable'}), 
         ('trippy_heart', 'plane', 'datas_trippy_subsample_2', {'every_nth': 2, 'fov': 'small', 'additional_features': False, 'ignore_last_n_scale': 7, 'include_noise_feature': True}), 
         ('primitives_wheel_only', 'none', 'datas_primitives', {'fov': 'small'})
+    ],
+    [
+        ('mandelbrot', 'plane', 'datas_mandelbrot', {'fov': 'small', 'additional_features': False, 'ignore_last_n_scale': 7, 'include_noise_feature': True, 'specified_ind': 'subsample_taylor_exp_vals.npy2.npy'}), 
+        ('mandelbulb_slim', 'none', 'datas_mandelbulb', {'fov': 'small_seperable'}), 
+        ('trippy_heart', 'plane', 'datas_trippy_subsample_2', {'every_nth': 2, 'fov': 'small', 'additional_features': False, 'ignore_last_n_scale': 7, 'include_noise_feature': True, 'specified_ind': 'subsample_taylor_exp_vals.npy4.npy'}), 
+        ('primitives_wheel_only', 'none', 'datas_primitives', {'fov': 'small'})
     ]
 ]
 
@@ -1394,18 +1400,7 @@ def main_network(args):
     else:
         ntiles_w = 1
         ntiles_h = 1
-        
-    if args.specified_ind != '':
-        my_specified_ind_file = os.path.join(args.name, 'specified_ind.npy')
-        specified_ind = np.load(args.specified_ind)
-        if not os.path.exists(my_specified_ind_file):
-            shutil.copyfile(args.specified_ind, my_specified_ind_file)
-        else:
-            my_ind = np.load(my_specified_ind_file)
-            assert np.allclose(my_ind, specified_ind)
-    else:
-        specified_ind = None
-    
+
     render_sigma = [args.render_sigma, args.render_sigma, 0]
     
     if (args.tiled_training or args.tile_only) and (not inference_entire_img_valid):
@@ -1498,7 +1493,10 @@ def main_network(args):
             args.dataroot = os.path.join(orig_args.dataroot_parent, dataroot)
 
             for key in extra_args.keys():
-                setattr(args, key, extra_args[key])
+                if key == 'specified_ind':
+                    setattr(args, key, os.path.join(orig_args.dataroot_parent, dataroot, extra_args[key]))
+                else:
+                    setattr(args, key, extra_args[key])
                 
             if multiple_feature_reduction_ch is not None:
                 args.feature_reduction_ch = multiple_feature_reduction_ch[shader_ind]
@@ -1535,6 +1533,17 @@ def main_network(args):
                 time_vals = np.load(os.path.join(args.dataroot, 'test_time.npy'))
 
             nexamples = time_vals.shape[0]
+            
+            if args.specified_ind != '':
+                my_specified_ind_file = os.path.join(args.name, '%s_specified_ind.npy' % args.shader_name)
+                specified_ind = np.load(args.specified_ind)
+                if not os.path.exists(my_specified_ind_file):
+                    shutil.copyfile(args.specified_ind, my_specified_ind_file)
+                else:
+                    my_ind = np.load(my_specified_ind_file)
+                    assert np.allclose(my_ind, specified_ind)
+            else:
+                specified_ind = None
             
             def feature_reduction_layer(input_to_network, _replace_normalize_weights=None, shadername=''):
                 with tf.variable_scope("feature_reduction" + shadername, reuse=tf.AUTO_REUSE):
