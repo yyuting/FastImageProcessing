@@ -86,11 +86,22 @@ shaders_pool = [
 
 all_shaders = shaders_pool[0]
 
-all_shaders_aux = [
-    ('mandelbrot', 'plane', 'datas_mandelbrot', {'fov': 'small'}), 
-    ('mandelbulb', 'none', 'datas_mandelbulb', {'fov': 'small_seperable'}), 
-    ('trippy_heart', 'plane', 'datas_trippy_subsample_2', {'every_nth': 2, 'fov': 'small'}), 
-    ('primitives_wheel_only', 'none', 'datas_primitives', {'fov': 'small'})]
+shaders_aux_pool = [
+    [
+        ('mandelbrot', 'plane', 'datas_mandelbrot', {'fov': 'small'}), 
+        ('mandelbulb', 'none', 'datas_mandelbulb', {'fov': 'small_seperable'}), 
+        ('trippy_heart', 'plane', 'datas_trippy_subsample_2', {'every_nth': 2, 'fov': 'small'}), 
+        ('primitives_wheel_only', 'none', 'datas_primitives', {'fov': 'small'})
+    ],
+    [
+        ('mandelbrot', 'plane', 'datas_mandelbrot', {'fov': 'small'}), 
+        ('mandelbulb_slim', 'none', 'datas_mandelbulb', {'fov': 'small_seperable'}), 
+        ('trippy_heart', 'plane', 'datas_trippy_subsample_2', {'every_nth': 2, 'fov': 'small'}), 
+        ('primitives_wheel_only', 'none', 'datas_primitives', {'fov': 'small'})
+    ],
+]
+
+all_shaders_aux = shaders_aux_pool[0]
 
 def smart_mkdir(dir):
     if os.path.isdir(dir):
@@ -1455,12 +1466,11 @@ def main_network(args):
         global_epoch = args.which_epoch + 1
         
     if args.manual_features_only:
-        global all_shaders, all_shaders_aux
-        all_shaders = all_shaders_aux
+        global shaders_pool, shaders_aux_pool
+        shaders_pool = shaders_aux_pool
         
-    if args.choose_shaders > 0:
-        global all_shaders, shaders_pool
-        all_shaders = shaders_pool[args.choose_shaders]
+    global all_shaders, shaders_pool
+    all_shaders = shaders_pool[args.choose_shaders]
         
     all_train_writers = [None] * len(all_shaders)
     
