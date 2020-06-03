@@ -81,6 +81,18 @@ shaders_pool = [
         ('mandelbulb_slim', 'none', 'datas_mandelbulb', {'fov': 'small_seperable'}), 
         ('trippy_heart', 'plane', 'datas_trippy_subsample_2', {'every_nth': 2, 'fov': 'small', 'additional_features': False, 'ignore_last_n_scale': 7, 'include_noise_feature': True, 'specified_ind': 'subsample_taylor_exp_vals.npy4.npy'}), 
         ('primitives_wheel_only', 'none', 'datas_primitives', {'fov': 'small'})
+    ],
+    [
+        ('mandelbrot', 'plane', 'datas_mandelbrot_with_bg', {'fov': 'small', 'additional_features': False, 'ignore_last_n_scale': 7, 'include_noise_feature': True}), 
+        ('mandelbulb_slim', 'none', 'datas_mandelbulb_with_bg', {'fov': 'small_seperable'}), 
+        ('trippy_heart', 'plane', 'datas_trippy_subsample_2', {'every_nth': 2, 'fov': 'small', 'additional_features': False, 'ignore_last_n_scale': 7, 'include_noise_feature': True}), 
+        ('primitives_wheel_only', 'none', 'datas_primitives', {'fov': 'small'})
+    ],
+    [
+        ('mandelbrot', 'plane', 'datas_mandelbrot_with_bg', {'fov': 'small', 'additional_features': False, 'ignore_last_n_scale': 7, 'include_noise_feature': True, 'specified_ind': 'subsample_taylor_exp_vals.npy2.npy'}), 
+        ('mandelbulb_slim', 'none', 'datas_mandelbulb_with_bg', {'fov': 'small_seperable'}), 
+        ('trippy_heart', 'plane', 'datas_trippy_subsample_2', {'every_nth': 2, 'fov': 'small', 'additional_features': False, 'ignore_last_n_scale': 7, 'include_noise_feature': True, 'specified_ind': 'subsample_taylor_exp_vals.npy4.npy'}), 
+        ('primitives_wheel_only', 'none', 'datas_primitives', {'fov': 'small'})
     ]
 ]
 
@@ -99,6 +111,12 @@ shaders_aux_pool = [
         ('trippy_heart', 'plane', 'datas_trippy_subsample_2', {'every_nth': 2, 'fov': 'small'}), 
         ('primitives_wheel_only', 'none', 'datas_primitives', {'fov': 'small'})
     ],
+    [
+        ('mandelbrot', 'plane', 'datas_mandelbrot_with_bg', {'fov': 'small'}), 
+        ('mandelbulb_slim', 'none', 'datas_mandelbulb_with_bg', {'fov': 'small_seperable'}), 
+        ('trippy_heart', 'plane', 'datas_trippy_subsample_2', {'every_nth': 2, 'fov': 'small'}), 
+        ('primitives_wheel_only', 'none', 'datas_primitives', {'fov': 'small'})
+    ]
 ]
 
 all_shaders_aux = shaders_aux_pool[0]
