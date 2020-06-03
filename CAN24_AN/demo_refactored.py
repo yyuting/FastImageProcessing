@@ -172,6 +172,8 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
             shader_args = ' render_venice_simplified_proxy_10_80 ' + geometry + ' none'
         elif shader_name == 'venice_simplified_proxy_5_100':
             shader_args = ' render_venice_simplified_proxy_5_100 ' + geometry + ' none'
+        elif shader_name == 'venice_simplified_proxy_30_100':
+            shader_args = ' render_venice_simplified_proxy_30_100 ' + geometry + ' none'
         elif shader_name == 'venice':
             shader_args = ' render_venice ' + geometry + ' none'
         elif shader_name == 'plane_basics':
