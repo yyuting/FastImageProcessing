@@ -1714,11 +1714,6 @@ def main_network(args):
 
                     sparsity_loss = tf.constant(0.0, dtype=dtype)
 
-
-                    if args.analyze_channel:
-                        sparsity_vec = tf.ones(args.input_nc, dtype=dtype)
-                        input_to_network = input_to_network * sparsity_vec
-
                     actual_initial_layer_channels = args.initial_layer_channels
 
                     feature_reduction_tensor = None
@@ -2264,26 +2259,21 @@ def main_network(args):
                         all_adds[id, :, :, 0] = read_name(add_names[id], True)
 
             if args.analyze_channel:
-                g_channel = tf.abs(tf.gradients(loss_l2, sparsity_vec, stop_gradients=tf.trainable_variables())[0])
 
-                feature_map_grad = tf.gradients(loss_l2, debug_input, stop_gradients=tf.trainable_variables())[0]
-                feature_map_taylor = tf.reduce_mean(tf.abs(tf.reduce_mean(feature_map_grad * debug_input, (1, 2))), 0)
+                total_loss_grad = tf.gradients(loss_l2, debug_input, stop_gradients=tf.trainable_variables())[0]
+                total_loss_taylor = tf.reduce_mean(tf.abs(tf.reduce_mean(total_loss_grad * debug_input, (1, 2))), 0)
 
-                # use 3 metrics
-                # distance go gt (good example)
-                # distance to RGB+aux result (bad example)
-                # distance to current inference (network true example)
-                if not args.analyze_current_only:
-                    g_good = np.zeros(args.input_nc)
-                    g_bad = np.zeros(args.input_nc)
-                    if args.test_training:
-                        bad_dir = os.path.join(args.bad_example_base_dir, 'train')
-                    else:
-                        bad_dir = os.path.join(args.bad_example_base_dir, 'test')
-
-                g_current = np.zeros(args.input_nc)
-
-                taylor_exp_vals = np.zeros(args.input_nc)
+                encoder_channelwise_taylors = []
+                channelwise_sum = tf.reduce_sum(feature_reduction_tensor, (0, 1, 2))
+                for i in range(args.conv_channel_no):
+                    encoder_channelwise_grad = tf.gradients(channelwise_sum[i], debug_input, stop_gradients=tf.trainable_variables())[0]
+                    encoder_channelwise_taylor = tf.reduce_mean(tf.abs(encoder_channelwise_grad * debug_input), (0, 1, 2))
+                    encoder_channelwise_taylors.append(encoder_channelwise_taylor)
+                    
+                encoder_channelwise_taylors = tf.stack(encoder_channelwise_taylors, 0)
+                
+                total_loss_taylor_vals = np.zeros(args.input_nc)
+                encoder_channelwise_taylor_vals = np.zeros((args.conv_channel_no, args.input_nc))
 
                 feed_dict = {}
                 current_dir = 'train' if args.test_training else 'test'
@@ -2293,16 +2283,10 @@ def main_network(args):
                         feed_dict[h_start] = np.array([- padding_offset // 2]).astype('i')
                         feed_dict[w_start] = np.array([- padding_offset // 2]).astype('i')
 
-                if os.path.isdir(current_dir):
-                    render_current = False
-                else:
-                    os.makedirs(current_dir)
-                    render_current = True
                 for i in range(len(val_img_names)):
                     print(i)
                     output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
-                    if not args.analyze_current_only:
-                        bad_example = np.expand_dims(read_name(os.path.join(bad_dir, '%06d.png' % (i+1)), False, False), 0)
+
                     camera_val = np.expand_dims(camera_pos_vals[i, :], axis=1)
                     feed_dict[camera_pos] = camera_val
                     feed_dict[shader_time] = time_vals[i:i+1]
@@ -2311,98 +2295,26 @@ def main_network(args):
                         feed_dict[h_start] = tile_start_vals[i:i+1, 0] - padding_offset // 2
                         feed_dict[w_start] = tile_start_vals[i:i+1, 1] - padding_offset // 2
 
-                    if render_current:
-                        current_output = sess.run(network, feed_dict=feed_dict)
-                        cv2.imwrite('%s/%06d.png' % (current_dir, i+1), np.uint8(255.0 * np.clip(current_output[0, :, :, :], 0.0, 1.0)))
-                    else:
-                        current_output = np.expand_dims(read_name(os.path.join(current_dir, '%06d.png' % (i+1)), False, False), 0)
-                    if not args.analyze_current_only:
-                        feed_dict[output_pl] = output_ground
-                        g_good += sess.run(g_channel, feed_dict=feed_dict)
-                        feed_dict[output_pl] = bad_example
-                        g_bad += sess.run(g_channel, feed_dict=feed_dict)
-
-                    feed_dict[output_pl] = current_output
-                    g_current += sess.run(g_channel, feed_dict=feed_dict)
-
                     feed_dict[output_pl] = output_ground
-                    taylor_exp_vals += sess.run(feature_map_taylor, feed_dict=feed_dict)
+                    
+                    current_total_taylor, current_channelwise_taylor = sess.run([total_loss_taylor,  encoder_channelwise_taylors], feed_dict=feed_dict)
+                    
+                    total_loss_taylor_vals += current_total_taylor
+                    encoder_channelwise_taylor_vals += current_channelwise_taylor
 
-                if not args.analyze_current_only:
-                    g_good /= len(val_img_names)
-                    g_bad /= len(val_img_names)
-                    numpy.save(os.path.join(current_dir, 'g_good.npy'), g_good)
-                    numpy.save(os.path.join(current_dir, 'g_bad.npy'), g_bad)
-
-                g_current /= len(val_img_names)
-                numpy.save(os.path.join(current_dir, 'g_current.npy'), g_current)
-
-                taylor_exp_vals /= len(val_img_names)
-                numpy.save(os.path.join(current_dir, 'taylor_exp_vals.npy'), taylor_exp_vals)
-
-                logbins = np.logspace(-7, np.log10(np.max(np.abs(g_current))), 11)
-                logbins[0] = 0
-
-                if not args.analyze_current_only:
-                    figure = pyplot.figure()
-                    ax = pyplot.subplot(211)
-                    pyplot.bar(np.arange(args.input_nc), np.abs(g_good), width=2)
-                    ax.set_title('Barplot for gradient magnitude of each channel')
-                    ax = pyplot.subplot(212)
-                    pyplot.hist(np.abs(g_good), bins=logbins)
-                    pyplot.xscale('log')
-                    ax.set_title('Histogram for gradient magnitude of channels')
-                    pyplot.tight_layout()
-                    figure.savefig('%s/g_good.png' % current_dir)
-                    pyplot.close(figure)
-
-                    figure = pyplot.figure()
-                    ax = pyplot.subplot(211)
-                    pyplot.bar(np.arange(args.input_nc), numpy.sort(np.abs(g_good))[::-1], width=2)
-                    ax.set_title('Barplot for sorted gradient magnitude of each channel')
-                    ax = pyplot.subplot(212)
-                    pyplot.hist(np.abs(g_good), bins=logbins)
-                    pyplot.xscale('log')
-                    ax.set_title('Histogram for gradient magnitude of channels')
-                    pyplot.tight_layout()
-                    figure.savefig('%s/g_good_sorted.png' % current_dir)
-                    pyplot.close(figure)
-
-                    figure = pyplot.figure()
-                    ax = pyplot.subplot(211)
-                    pyplot.bar(np.arange(args.input_nc), np.abs(g_bad), width=2)
-                    ax.set_title('Barplot for gradient magnitude of each channel')
-                    ax = pyplot.subplot(212)
-                    pyplot.hist(np.abs(g_bad), bins=logbins)
-                    pyplot.xscale('log')
-                    ax.set_title('Histogram for gradient magnitude of channels')
-                    pyplot.tight_layout()
-                    figure.savefig('%s/g_bad.png' % current_dir)
-                    pyplot.close(figure)
-
-                figure = pyplot.figure()
-                ax = pyplot.subplot(211)
-                pyplot.bar(np.arange(args.input_nc), np.abs(g_current), width=2)
-                ax.set_title('Barplot for gradient magnitude of each channel')
-                ax = pyplot.subplot(212)
-                pyplot.hist(np.abs(g_current), bins=logbins)
-                pyplot.xscale('log')
-                ax.set_title('Histogram for gradient magnitude of channels')
-                pyplot.tight_layout()
-                figure.savefig('%s/g_current.png' % current_dir)
-                pyplot.close(figure)
+                total_loss_taylor_vals /= len(val_img_names)
+                numpy.save(os.path.join(current_dir, 'total_loss_taylor_vals.npy'), total_loss_taylor_vals)
+                
+                encoder_channelwise_taylor_vals /= len(val_img_names)
+                numpy.save(os.path.join(current_dir, 'encoder_channelwise_taylor_vals.npy'), encoder_channelwise_taylor_vals)
 
                 valid_inds = np.load(os.path.join(args.name, 'valid_inds.npy'))
-                if not args.analyze_current_only:
-                    max_g_good_ind = np.argsort(np.abs(g_good))[::-1]
-                    print('max activation for g_good:')
-                    print(valid_inds[max_g_good_ind[:20]])
-                    max_g_bad_ind = np.argsort(np.abs(g_bad))[::-1]
-                    print('max activation for g_bad:')
-                    print(valid_inds[max_g_bad_ind[:20]])
-                max_g_current_ind = np.argsort(np.abs(g_current))[::-1]
-                print('max activation for g_current:')
-                print(valid_inds[max_g_current_ind[:20]])
+                
+                print('max channelwise ind')
+                for i in range(encoder_channelwise_taylor_vals.shape[0]):
+                    max_channelwise_ind = np.argsort(encoder_channelwise_taylor_vals[i])[::-1]
+                    print(i, ':, ', valid_inds[max_channelwise_ind[:5]])
+
                 return
 
             if args.is_train:
