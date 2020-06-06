@@ -15,7 +15,7 @@ def main():
         
     if mode in ['highest_score', 'lowest_score']:
         
-        sample_budget = int((score.shape[0] * sample_portion)) + col_aux_inds.shape[0]
+        sample_budget = int(np.ceil((score.shape[0] - col_aux_inds.shape[0]) * sample_portion)) + col_aux_inds.shape[0]
         
         sampled_ind = col_aux_inds.tolist()
         
