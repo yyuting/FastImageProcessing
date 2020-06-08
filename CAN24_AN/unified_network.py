@@ -63,6 +63,8 @@ less_aggresive_ini = False
 conv_padding = "SAME"
 padding_offset = 32
 
+analyze_per_ch = 2
+
 shaders_pool = [
     [
         ('mandelbrot', 'plane', 'datas_mandelbrot', {'fov': 'small', 'additional_features': False, 'ignore_last_n_scale': 7, 'include_noise_feature': True}), 
@@ -347,6 +349,8 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                     valid_features[i] = tf.cast(valid_features[i], dtype)
             if write_file:
                 numpy.save('%s/valid_inds.npy' % name, valid_inds)
+            elif alt_dir is not None:
+                numpy.save('%s/valid_inds.npy' % alt_dir, valid_inds)
             #valid_features = [features[k] for k in valid_inds]
 
             if manual_features_only:
@@ -1480,6 +1484,8 @@ def main_network(args):
     
     if args.is_train:
         global_epoch = args.epoch
+    elif args.analyze_channel:
+        global_epoch = args.which_epoch + 2 + args.conv_channel_no // analyze_per_ch
     else:
         global_epoch = args.which_epoch + 1
         
@@ -1500,9 +1506,16 @@ def main_network(args):
     
     T0 = time.time()
     
-    for global_e in range(args.which_epoch + 1, global_epoch + 1):
+    # DOGE: debug only
+    #for global_e in range(args.which_epoch + 1, global_epoch + 1):
+    for global_e in range(24, global_epoch + 1):
         
         print(global_e)
+        
+        analyze_encoder_only = False
+        if args.analyze_channel:
+            if global_e - args.which_epoch <= args.conv_channel_no // analyze_per_ch:
+                analyze_encoder_only = True
     
         for shader_ind in range(len(all_shaders)):
 
@@ -1717,415 +1730,84 @@ def main_network(args):
                     actual_initial_layer_channels = args.initial_layer_channels
 
                     feature_reduction_tensor = None
-                    if not args.train_temporal_seq:
 
 
-                        input_to_network = feature_reduction_layer(input_to_network, _replace_normalize_weights=replace_normalize_weights, shadername=args.shader_name)
-                        feature_reduction_tensor = input_to_network
+                    input_to_network = feature_reduction_layer(input_to_network, _replace_normalize_weights=replace_normalize_weights, shadername=args.shader_name)
+                    feature_reduction_tensor = input_to_network
+                    
+                    reduced_dim_feature = input_to_network
 
-
-
-                        reduced_dim_feature = input_to_network
+                    if not analyze_encoder_only:
 
                         network=build(input_to_network, ini_id, final_layer_channels=args.final_layer_channels, identity_initialize=args.identity_initialize, output_nc=3)
 
-                    else:
-                        # 2D case
-                        assert args.add_initial_layers
-                        if args.is_train:
-                            input_labels = []
-                            generated_frames = []
-                            current_input_ls = []
-                            generated_seq = []
-                            # all previous frames have input label and generated frames
-                            # do not include current input label because it's part of the trace
-                            ninputs = 2 * args.nframes_temporal_gen - 2
-                            for i in range(args.nframes_temporal_gen-1):
-                                input_labels.append(tf.stack([input_to_network[i:i+1, :, :, col] for col in color_inds], 3))
-                                generated_frames.append(tf.pad(output[:, :, :, 3*i:3*i+3], [[0, 0], [padding_offset // 2, padding_offset // 2], [padding_offset // 2, padding_offset // 2], [0, 0]]))
-                                current_input_ls.append(input_labels[-1])
-                                current_input_ls.append(generated_frames[-1])
 
-                            for i in range(args.nframes_temporal_gen-1, ngts):
-                                input_labels.append(tf.stack([input_to_network[i:i+1, :, :, col] for col in color_inds], 3))
-                                current_input_prev = tf.concat(current_input_ls, 3)
-                                with tf.variable_scope("single_frame_generator", reuse=tf.AUTO_REUSE):
-                                    current_input = feature_reduction_layer(input_to_network[i:i+1, :, :, :])
-                                    current_input = tf.concat((current_input, tf.stop_gradient(current_input_prev)), 3)
-                                    for nlayer in range(3):
-                                        current_input = slim.conv2d(current_input, args.initial_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=tf.contrib.layers.xavier_initializer(), scope='initial_'+str(nlayer), padding=conv_padding)
-                                    current_output = build(current_input, ini_id, final_layer_channels=args.final_layer_channels, identity_initialize=args.identity_initialize, output_nc=3)
-                                    generated_seq.append(current_output)
-                                generated_frames.append(tf.pad(current_output, [[0, 0], [padding_offset // 2, padding_offset // 2], [padding_offset // 2, padding_offset // 2], [0, 0]]))
-                                current_input_ls.append(input_labels[-1])
-                                current_input_ls.append(generated_frames[-1])
-                                current_input_ls = current_input_ls[2:]
+
+
+            loss = 0.0
+            loss_to_opt = 0.0
+                        
+            
+            if not analyze_encoder_only:
+            
+                weight_map = tf.placeholder(tf.float32,shape=[None,None,None])
+
+                if args.l2_loss:
+                    if (not args.is_train) or (not args.train_temporal_seq):
+                        if (not args.train_res) or (args.debug_mode and args.mean_estimator):
+                            diff = network - output
                         else:
-                            # at inference, do not build the giant graph
-                            # input previous frames with placeholder and feed_dict
-                            # so we can generate the seq as long as we wish
-                            input_label = tf.stack([input_to_network[:, :, :, col] for col in color_inds], 3)
-                            with tf.variable_scope("single_frame_generator", reuse=tf.AUTO_REUSE):
-                                current_input = feature_reduction_layer(input_to_network)
-                                current_input = tf.concat((current_input, previous_input), 3)
-                                for nlayer in range(3):
-                                    current_input = slim.conv2d(current_input, args.initial_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=tf.contrib.layers.xavier_initializer(), scope='initial_'+str(nlayer), padding=conv_padding)
-                                current_output = build(current_input, ini_id, final_layer_channels=args.final_layer_channels, identity_initialize=args.identity_initialize, output_nc=3)
-                                network = current_output
+                            input_color = tf.stack([debug_input[..., ind] for ind in color_inds], axis=-1)
+                            diff = network + input_color - output
+                            network += input_color
 
+                        if args.RGB_norm % 2 != 0:
+                            diff = tf.abs(diff)
+                        powered_diff = diff ** args.RGB_norm
 
+                        loss_per_sample = tf.reduce_mean(powered_diff, (1, 2, 3))
+                        loss = tf.reduce_mean(loss_per_sample)
 
-            weight_map = tf.placeholder(tf.float32,shape=[None,None,None])
-
-            if args.l2_loss:
-                if (not args.is_train) or (not args.train_temporal_seq):
-                    if (not args.train_res) or (args.debug_mode and args.mean_estimator):
-                        diff = network - output
                     else:
-                        input_color = tf.stack([debug_input[..., ind] for ind in color_inds], axis=-1)
-                        diff = network + input_color - output
-                        network += input_color
-
-                    if args.RGB_norm % 2 != 0:
-                        diff = tf.abs(diff)
-                    powered_diff = diff ** args.RGB_norm
-
-                    loss_per_sample = tf.reduce_mean(powered_diff, (1, 2, 3))
-                    loss = tf.reduce_mean(loss_per_sample)
-
+                        assert args.RGB_norm == 2
+                        assert not args.train_res
+                        loss = tf.reduce_mean((tf.concat(generated_seq, 3) - output[:, :, :, 3*(args.nframes_temporal_gen-1):]) ** 2)
                 else:
-                    assert args.RGB_norm == 2
-                    assert not args.train_res
-                    loss = tf.reduce_mean((tf.concat(generated_seq, 3) - output[:, :, :, 3*(args.nframes_temporal_gen-1):]) ** 2)
-            else:
-                loss = tf.constant(0.0, dtype=dtype)
+                    loss = tf.constant(0.0, dtype=dtype)
 
-            loss_l2 = loss
-            loss_add_term = loss
+                loss_l2 = loss
+                loss_add_term = loss
 
-            if args.perceptual_loss:
-                sys.path += ['../../tensorflow-vgg']
-                import vgg16
-                vgg_in = vgg16.Vgg16()
-                vgg_in.build(network)
-                vgg_out = vgg16.Vgg16()
-                vgg_out.build(output)
-                loss_vgg = tf.reduce_mean(tf.square(getattr(vgg_in, args.perceptual_loss_term) - getattr(vgg_out, args.perceptual_loss_term)))
-                perceptual_loss_add = args.perceptual_loss_scale * loss_vgg
-                loss += perceptual_loss_add
-            elif args.lpips_loss:
-                sys.path += ['../../lpips-tensorflow']
-                import lpips_tf
-                if args.train_temporal_seq and args.is_train:
-                    loss_lpips = 0.0
-                    for i in range(len(generated_seq)):
-                        start_ind = args.nframes_temporal_gen - 1 + i
-                        loss_lpips += lpips_tf.lpips(generated_seq[i], output[:, :, :, 3*start_ind:3*start_ind+3], model='net-lin', net=args.lpips_net)
-                    loss_lpips /= len(generated_seq)
-                else:
-                    loss_lpips = lpips_tf.lpips(network, output, model='net-lin', net=args.lpips_net)
-
-                perceptual_loss_add = args.lpips_loss_scale * loss_lpips
-                if args.batch_size > 1:
-                    perceptual_loss_add = tf.reduce_mean(perceptual_loss_add)
-                loss += perceptual_loss_add
-            else:
-                perceptual_loss_add = tf.constant(0)
-
-            if not args.spatial_GAN:
-                assert args.patch_gan_loss
-                assert args.train_temporal_seq
-
-            if (args.debug_mode and args.mean_estimator):
-                loss_to_opt = loss + sparsity_loss
-                gen_loss_GAN = tf.constant(0.0)
-                discrim_loss = tf.constant(0.0)
-                savers = []
-                save_names = []
-            elif args.patch_gan_loss:
-                loss = loss + sparsity_loss
-                # descriminator adapted from
-                # https://github.com/affinelayer/pix2pix-tensorflow/blob/master/pix2pix.py
-                # https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/models/networks.py
-                def create_discriminator(discrim_inputs, discrim_target, sliced_feat=None, other_target=None, is_temporal=False):
-                    n_layers = args.discrim_nlayers
-                    layers = []
-
-                    if (not isinstance(discrim_inputs, list)):
-                        discrim_inputs = [discrim_inputs]
-                    if None in discrim_inputs:
-                        discrim_inputs = None
-
-                    if not isinstance(discrim_target, list):
-                        discrim_target = [discrim_target]
-
-                    if discrim_inputs is not None:
-                        # 2x [batch, height, width, in_channels] => [batch, height, width, in_channels * 2]
-                        if (not args.discrim_use_trace) and (not args.discrim_paired_input):
-                            concat_list = discrim_inputs + discrim_target
-                        elif args.discrim_use_trace:
-                            concat_list = discrim_inputs + [sliced_feat]
-                            if args.discrim_paired_input:
-                                concat_list += discrim_target
-                                concat_list += [other_target]
-                            else:
-                                concat_list += discrim_target
-                        else:
-                            concat_list = discrim_target + [other_target]
-
-                        input = tf.concat(concat_list, axis=-1)
-                    else:
-                        input = tf.concat(discrim_target, axis=-1)
-
-                    d_network = input
-
-                    if is_temporal:
-                        n_ch = args.ndf_temporal
-                    else:
-                        n_ch = args.ndf
-
-                    # layer_0: [batch, 256, 256, in_channels * 2] => [batch, 128, 128, ndf]
-                    # layer_1: [batch, 128, 128, ndf] => [batch, 64, 64, ndf * 2]
-                    for i in range(n_layers):
-                        with tf.variable_scope("d_layer_%d" % i):
-                            # in the original pytorch implementation, no bias is added for layers except for 1st and last layer, for easy implementation, apply bias on all layers for no, should visit back to modify the code if this doesn't work
-                            out_channels = n_ch * 2**i
-                            if i == 0:
-                                d_nm = None
-                            else:
-                                d_nm = slim.batch_norm
-                            # use batch norm as this is the default setting for PatchGAN
-                            d_network = slim.conv2d(d_network, out_channels, [4, 4], stride=2, activation_fn=lrelu, padding="VALID", normalizer_fn=d_nm)
-
-                    # layer_2: [batch, 128, 128, ndf * 2] => [batch, 125, 125, ndf * 4]
-                    # layer_3: [batch, 125, 125, ndf * 4] => [batch, 122, 122, 1]
-                    with tf.variable_scope("layer_%d" % (n_layers)):
-                        out_channels = n_ch * 2**n_layers
-                        d_network = slim.conv2d(d_network, out_channels, [4, 4], stride=1, activation_fn=lrelu, padding="VALID", normalizer_fn=slim.batch_norm)
-
-                    with tf.variable_scope("layer_%d" % (n_layers+1)):
-                        d_network = slim.conv2d(d_network, 1, [4, 4], stride=1, activation_fn=None, padding="VALID", normalizer_fn=None)
-
-
-                    return d_network
-
-
-                if args.is_train or args.collect_validate_loss:
-                    if args.train_temporal_seq:
-                        input_color = input_labels
-                    else:
-                        input_color = tf.stack([debug_input[:, :, :, ind] for ind in color_inds], axis=3)
-
-                    if args.tiled_training or args.tile_only:
-                        # previously using first 3 channels of debug_input, is it a bug?
-                        if args.train_temporal_seq:
-                            condition_input = [tf.slice(col, [0, padding_offset // 2, padding_offset // 2, 0], [args.batch_size, output_pl_h, output_pl_w, 3]) for col in input_color]
-                        else:
-                            condition_input = tf.slice(input_color, [0, padding_offset // 2, padding_offset // 2, 0], [args.batch_size, output_pl_h, output_pl_w, 3])
-                    else:
-                        condition_input = input_color
-
-                    if args.discrim_use_trace:
-                        assert not args.train_temporal_seq
-                        if args.discrim_trace_shared_weights:
-                            sliced_feat = tf.slice(reduced_dim_feature, [0, padding_offset // 2, padding_offset // 2, 0], [args.batch_size, output_pl_h, output_pl_w, args.conv_channel_no])
-                        else:
-                            # this may lead to OOM
-                            with tf.name_scope("discriminator_feature_reduction"):
-                                discrim_feat = feature_reduction_layer(debug_input)
-                                sliced_feat = tf.slice(discrim_feat, [0, padding_offset // 2, padding_offset // 2, 0], [args.batch_size, output_pl_h, output_pl_w, args.conv_channel_no])
-                    else:
-                        sliced_feat = None
-
-                    predict_real = None
-                    predict_fake = None
-                    if args.train_temporal_seq:
-                        assert not args.discrim_use_trace
-                        assert not args.discrim_paired_input
-                        predict_real_single = []
-                        predict_fake_single = []
-                        predict_real_seq = []
-                        predict_fake_seq = []
-                        # BUGFIX: this will not affect inference on trained models
-                        # because inference does not involve discriminators
-                        # but should re-train those temporal results once there's free GPU
-                        condition_input = condition_input[(args.nframes_temporal_gen-1):]
-
-
-                        if args.spatial_GAN:
-                            for i in range(len(generated_seq)):
-                                start_ind = args.nframes_temporal_gen - 1 + i
-                                with tf.name_scope("discriminator_real"):
-                                    with tf.variable_scope("discriminator_single", reuse=tf.AUTO_REUSE):
-                                        predict_real_single.append(create_discriminator(condition_input[i], output[:, :, :, 3*start_ind:3*start_ind+3]))
-                                with tf.name_scope("discriminator_fake"):
-                                    with tf.variable_scope("discriminator_single", reuse=tf.AUTO_REUSE):
-                                        predict_fake_single.append(create_discriminator(condition_input[i], generated_seq[i]))
-
-                        for i in range(0, len(generated_seq), args.nframes_temporal_discrim):
+                if args.perceptual_loss:
+                    sys.path += ['../../tensorflow-vgg']
+                    import vgg16
+                    vgg_in = vgg16.Vgg16()
+                    vgg_in.build(network)
+                    vgg_out = vgg16.Vgg16()
+                    vgg_out.build(output)
+                    loss_vgg = tf.reduce_mean(tf.square(getattr(vgg_in, args.perceptual_loss_term) - getattr(vgg_out, args.perceptual_loss_term)))
+                    perceptual_loss_add = args.perceptual_loss_scale * loss_vgg
+                    loss += perceptual_loss_add
+                elif args.lpips_loss:
+                    sys.path += ['../../lpips-tensorflow']
+                    import lpips_tf
+                    if args.train_temporal_seq and args.is_train:
+                        loss_lpips = 0.0
+                        for i in range(len(generated_seq)):
                             start_ind = args.nframes_temporal_gen - 1 + i
-                            with tf.name_scope("discriminator_real"):
-                                with tf.variable_scope("discriminator_seq", reuse=tf.AUTO_REUSE):
-                                    predict_real_seq.append( create_discriminator(condition_input[i:i+args.nframes_temporal_discrim], output[:, :, :, 3*start_ind:3*start_ind+3*args.nframes_temporal_discrim], is_temporal=True))
-                            with tf.name_scope("discriminator_fake"):
-                                with tf.variable_scope("discriminator_seq", reuse=tf.AUTO_REUSE):
-                                    predict_fake_seq.append(create_discriminator(condition_input[i:i+args.nframes_temporal_discrim], generated_seq[i:i+args.nframes_temporal_discrim], is_temporal=True))
-
+                            loss_lpips += lpips_tf.lpips(generated_seq[i], output[:, :, :, 3*start_ind:3*start_ind+3], model='net-lin', net=args.lpips_net)
+                        loss_lpips /= len(generated_seq)
                     else:
-                        with tf.name_scope("discriminator_real"):
-                            with tf.variable_scope("discriminator", reuse=tf.AUTO_REUSE):
-                                predict_real = create_discriminator(condition_input, output, sliced_feat, network)
+                        loss_lpips = lpips_tf.lpips(network, output, model='net-lin', net=args.lpips_net)
 
-                        with tf.name_scope("discriminator_fake"):
-                            with tf.variable_scope("discriminator", reuse=tf.AUTO_REUSE):
-                                predict_fake = create_discriminator(condition_input, network, sliced_feat, output)
-
-                    if args.gan_loss_style == 'wgan':
-                        with tf.name_scope("discriminator_sample"):
-                            with tf.variable_scope("discriminator", reuse=True):
-                                t = tf.random_uniform([], 0.0, 1.0)
-                                sampled_data = t * output + (1 - t) * network
-                                predict_sample = create_discriminator(condition_input, sampled_data, sliced_feat, output)
-                    else:
-                        predict_sample = None
-                        sampled_data = None
-
-
-                    #dest='gan_loss_style', default='cross_entropy'
-
-                    def cross_entropy_gan(data, label):
-                        if label == True:
-                            return tf.nn.sigmoid_cross_entropy_with_logits(logits=data, labels=tf.ones_like(data))
-                        else:
-                            return tf.nn.sigmoid_cross_entropy_with_logits(logits=data, labels=tf.zeros_like(data))
-
-                    def wgan(data, label):
-                        if label == True:
-                            return -data
-                        else:
-                            return data
-
-                    def lsgan(data, label):
-                        if label == True:
-                            return (data - 1) ** 2
-                        else:
-                            return data ** 2
-
-                    if args.gan_loss_style == 'cross_entropy':
-                        gan_loss_func =  cross_entropy_gan
-                    elif args.gan_loss_style == 'wgan':
-                        gan_loss_func = wgan
-                    elif args.gan_loss_style == 'lsgan':
-                        gan_loss_func = lsgan
-                    else:
-                        raise
-
-                    with tf.name_scope("discriminator_loss"):
-                        #loss_real = tf.nn.sigmoid_cross_entropy_with_logits(logits=predict_real, labels=tf.ones_like(predict_real))
-                        #loss_fake = tf.nn.sigmoid_cross_entropy_with_logits(logits=predict_fake, labels=tf.zeros_like(predict_fake))
-
-                        if predict_real is not None and predict_fake is not None:
-                            loss_real = gan_loss_func(predict_real, True)
-                            loss_fake = gan_loss_func(predict_fake, False)
-
-                            discrim_loss = tf.reduce_mean(loss_real + loss_fake)
-                        else:
-                            loss_real_sp = 0.0
-                            loss_fake_sp = 0.0
-                            loss_real_tp = 0.0
-                            loss_fake_tp = 0.0
-
-                            for predict in predict_real_single:
-                                loss_real_sp += tf.reduce_mean(gan_loss_func(predict, True))
-                            loss_real_sp /= max(len(predict_real_single), 1)
-
-                            for predict in predict_fake_single:
-                                loss_fake_sp += tf.reduce_mean(gan_loss_func(predict, False))
-                            loss_fake_sp /= max(len(predict_fake_single), 1)
-
-                            for predict in predict_real_seq:
-                                loss_real_tp += tf.reduce_mean(gan_loss_func(predict, True))
-                            loss_real_tp /= len(predict_real_seq)
-
-                            for predict in predict_fake_seq:
-                                loss_fake_tp += tf.reduce_mean(gan_loss_func(predict, False))
-                            loss_fake_tp /= len(predict_fake_seq)
-
-                            discrim_loss = (loss_real_sp + loss_real_tp + loss_fake_sp + loss_fake_tp) * 0.5
-
-                        if args.gan_loss_style == 'wgan':
-                            sample_gradient = tf.gradients(predict_sample, sampled_data)[0]
-                            # modify the penalty a little bit, don't want to deal with sqrt in tensorflow since it's not stable
-                            gradient_penalty = tf.reduce_mean((sample_gradient ** 2.0 - 1.0) ** 2.0)
-                            discrim_loss = discrim_loss + 10.0 * gradient_penalty
-
-                    with tf.name_scope("discriminator_train"):
-
-                        discrim_tvars = [var for var in tf.trainable_variables() if var.name.startswith("discriminator")]
-                        discrim_optim = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
-
-                        if args.discrim_train_steps > 1:
-                            step_count = tf.placeholder(tf.int32)
-                            discrim_step = tf.cond(tf.floormod(step_count, args.discrim_train_steps) < 1, lambda: discrim_optim.minimize(discrim_loss, var_list=discrim_tvars), lambda: tf.no_op())
-                        else:
-                            discrim_step = discrim_optim.minimize(discrim_loss, var_list=discrim_tvars)
-
-                    discrim_saver = tf.train.Saver(discrim_tvars, max_to_keep=1000)
-
-
-                    with tf.name_scope("generator_loss"):
-                        #gen_loss_GAN = tf.nn.sigmoid_cross_entropy_with_logits(logits=predict_fake, labels=tf.ones_like(predict_fake))
-                        gen_loss_GAN = 0
-                        if predict_fake is not None:
-                            gen_loss_GAN = gan_loss_func(predict_fake, True)
-                            gen_loss_GAN = tf.reduce_mean(gen_loss_GAN)
-                        else:
-                            gen_loss_fake_sp = 0.0
-                            gen_loss_fake_tp = 0.0
-
-                            for predict in predict_fake_single:
-                                gen_loss_fake_sp += tf.reduce_mean(gan_loss_func(predict, True))
-                            gen_loss_fake_sp /= max(len(predict_fake_single), 1)
-
-                            for predict in predict_fake_seq:
-                                gen_loss_fake_tp += tf.reduce_mean(gan_loss_func(predict, True))
-                            gen_loss_fake_tp /= len(predict_fake_seq)
-
-                            gen_loss_GAN = (gen_loss_fake_sp + gen_loss_fake_tp) * 0.5
-
-                        gen_loss = args.gan_loss_scale * gen_loss_GAN + loss
-
+                    perceptual_loss_add = args.lpips_loss_scale * loss_lpips
+                    if args.batch_size > 1:
+                        perceptual_loss_add = tf.reduce_mean(perceptual_loss_add)
+                    loss += perceptual_loss_add
                 else:
-                    gen_loss = loss
+                    perceptual_loss_add = tf.constant(0)
 
-                with tf.name_scope("generator_train"):
-                    if args.is_train:
-                        dependency = [discrim_step]
-                    else:
-                        dependency = []
-                    with tf.control_dependencies(dependency):
-                        gen_tvars = [var for var in tf.trainable_variables() if var.name.startswith("generator")]
-                        gen_optim = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
-                        gen_step = gen_optim.minimize(gen_loss, var_list=gen_tvars)
 
-                opt = gen_step
-
-                encoder_vars = [var for var in gen_tvars if 'feature_reduction' in var.name]
-                other_gen_vars = [var for var in gen_tvars if 'feature_reduction' not in var.name]
-
-                encoder_saver = tf.train.Saver(encoder_vars, max_to_keep=1000)
-                gen_saver = tf.train.Saver(other_gen_vars, max_to_keep=1000)
-
-                if args.is_train or args.collect_validate_loss:
-                    savers = [gen_saver, encoder_saver, discrim_saver]
-                    save_names = ['model_gen', '%s_encoder' % args.shader_name, 'model_discrim']
-                else:
-                    savers = [gen_saver, encoder_saver]
-                    save_names = ['model_gen', '%s_encoder' % args.shader_name]
-
-                loss_to_opt = loss
-
-            else:
                 loss_to_opt = loss + sparsity_loss
                 gen_loss_GAN = tf.constant(0.0)
                 discrim_loss = tf.constant(0.0)
@@ -2139,15 +1821,20 @@ def main_network(args):
 
                     opt=adam_optimizer.minimize(loss_to_opt,var_list=var_list)
 
-                all_vars = tf.trainable_variables()
+            all_vars = tf.trainable_variables()
 
-                encoder_vars = [var for var in all_vars if 'feature_reduction' in var.name]
+            encoder_vars = [var for var in all_vars if 'feature_reduction' in var.name]
 
-                generator_vars = [var for var in all_vars if 'feature_reduction' not in var.name]
+            generator_vars = [var for var in all_vars if 'feature_reduction' not in var.name]
 
-                encoder_saver = tf.train.Saver(encoder_vars, max_to_keep=1000)
+            encoder_saver = tf.train.Saver(encoder_vars, max_to_keep=1000)
+            
+
+            if analyze_encoder_only:
+                savers = [encoder_saver]
+                save_names = ['%s_encoder' % args.shader_name]
+            else:
                 gen_saver = tf.train.Saver(generator_vars, max_to_keep=1000)
-
                 savers = [encoder_saver, gen_saver]
                 save_names = ['%s_encoder' % args.shader_name, 'model_gen']
 
@@ -2173,9 +1860,9 @@ def main_network(args):
                         print('No best validation result exist')
                         raise
                     read_from_epoch = False
-                
+
                 else:
-                    
+
                     if not args.is_train:
                         # in this version we do not save models to root directory anymore
                         assert args.which_epoch > 0
@@ -2189,12 +1876,12 @@ def main_network(args):
                             others_epoch = global_e - 1
                         else:
                             others_epoch = global_e
-                            
+
                         read_from_epoch = False
-                        
+
                     encoder_saver_exist = True
                     other_saver_exist = True
-                        
+
                     for c_i in range(len(savers)):
                         if savers[c_i] == encoder_saver:
                             ckpts[c_i] = tf.train.get_checkpoint_state(os.path.join(args.name, "%04d"%int(encoder_epoch), save_names[c_i]))
@@ -2204,15 +1891,15 @@ def main_network(args):
                             ckpts[c_i] = tf.train.get_checkpoint_state(os.path.join(args.name, "%04d"%int(others_epoch), save_names[c_i]))
                             if ckpts[c_i] is None:
                                 other_saver_exist = False
-                                
+
                     if not other_saver_exist:
                         assert not read_from_epoch
                         assert global_e == 1 and shader_ind == 0
-                    
+
                     if not encoder_saver_exist:
                         assert not read_from_epoch
                         assert global_e == 1
-                    
+
 
                 for c_i in range(len(ckpts)):
                     if ckpts[c_i] is not None:
@@ -2237,6 +1924,18 @@ def main_network(args):
                     return False
                 return True
 
+
+
+            if args.preload and args.is_train:
+                output_images = np.empty([camera_pos_vals.shape[0], output_pl_h, output_pl_w, 3])
+                all_grads = [None] * camera_pos_vals.shape[0]
+                all_adds = np.empty([camera_pos_vals.shape[0], output_pl_h, output_pl_w, 1])
+                for id in range(camera_pos_vals.shape[0]):
+                    output_images[id, :, :, :] = read_name(output_names[id], False)
+                    print(id)
+                    if args.additional_input:
+                        all_adds[id, :, :, 0] = read_name(add_names[id], True)
+                        
             def read_name(name, is_npy, is_bin=False):
                 if not os.path.exists(name):
                     return None
@@ -2248,43 +1947,82 @@ def main_network(args):
                 else:
                     return np.fromfile(name, dtype=np.float32).reshape([640, 960, args.input_nc])
 
-            if args.preload and args.is_train:
-                output_images = np.empty([camera_pos_vals.shape[0], output_pl_h, output_pl_w, 3])
-                all_grads = [None] * camera_pos_vals.shape[0]
-                all_adds = np.empty([camera_pos_vals.shape[0], output_pl_h, output_pl_w, 1])
-                for id in range(camera_pos_vals.shape[0]):
-                    output_images[id, :, :, :] = read_name(output_names[id], False)
-                    print(id)
-                    if args.additional_input:
-                        all_adds[id, :, :, 0] = read_name(add_names[id], True)
-
             if args.analyze_channel:
+                
+                if args.test_output_dir != '':
+                    args.name = args.test_output_dir
 
-                total_loss_grad = tf.gradients(loss_l2, debug_input, stop_gradients=tf.trainable_variables())[0]
-                total_loss_taylor = tf.reduce_mean(tf.abs(tf.reduce_mean(total_loss_grad * debug_input, (1, 2))), 0)
+                
+                
+                feed_dict = {}
+                current_dir = 'train' if args.test_training else 'test'
+                current_dir = os.path.join(args.name, current_dir)
+                
+                if not os.path.isdir(current_dir):
+                    os.makedirs(current_dir)
+                
+                if args.tile_only:
+                    if inference_entire_img_valid:
+                        feed_dict[h_start] = np.array([- padding_offset // 2]).astype('i')
+                        feed_dict[w_start] = np.array([- padding_offset // 2]).astype('i')
+                        
+                       
+                if not analyze_encoder_only:
+                    
+                    total_loss_grad = tf.gradients(loss_l2, debug_input, stop_gradients=tf.trainable_variables())[0]
+                    total_loss_taylor = tf.reduce_mean(tf.abs(tf.reduce_mean(total_loss_grad * debug_input, (1, 2))), 0)
 
+                    total_loss_taylor_vals = np.zeros(args.input_nc)
+                
+                    for i in range(len(val_img_names)):
+                        print(args.shader_name, i)
+                        output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
+
+                        camera_val = np.expand_dims(camera_pos_vals[i, :], axis=1)
+                        feed_dict[camera_pos] = camera_val
+                        feed_dict[shader_time] = time_vals[i:i+1]
+
+                        if not inference_entire_img_valid:
+                            feed_dict[h_start] = tile_start_vals[i:i+1, 0] - padding_offset // 2
+                            feed_dict[w_start] = tile_start_vals[i:i+1, 1] - padding_offset // 2
+
+                        feed_dict[output_pl] = output_ground
+
+                        current_total_taylor = sess.run(total_loss_taylor, feed_dict=feed_dict)
+
+                        total_loss_taylor_vals += current_total_taylor
+
+                    total_loss_taylor_vals /= len(val_img_names)
+                    numpy.save(os.path.join(current_dir, 'total_loss_taylor_vals_%s.npy' % args.shader_name), total_loss_taylor_vals)
+                    
+                    continue
+                
+                
+                encoder_channelwise_taylor_vals = np.zeros((analyze_per_ch, args.input_nc))
+                
                 encoder_channelwise_taylors = []
                 channelwise_sum = tf.reduce_sum(feature_reduction_tensor, (0, 1, 2))
-                for i in range(args.conv_channel_no):
+                
+                start_ch = (global_e - args.which_epoch - 1) * analyze_per_ch
+
+                #for i in range(args.conv_channel_no):
+                for i in range(start_ch, start_ch + analyze_per_ch):
                     encoder_channelwise_grad = tf.gradients(channelwise_sum[i], debug_input, stop_gradients=tf.trainable_variables())[0]
                     encoder_channelwise_taylor = tf.reduce_mean(tf.abs(encoder_channelwise_grad * debug_input), (0, 1, 2))
                     encoder_channelwise_taylors.append(encoder_channelwise_taylor)
                     
                 encoder_channelwise_taylors = tf.stack(encoder_channelwise_taylors, 0)
                 
-                total_loss_taylor_vals = np.zeros(args.input_nc)
-                encoder_channelwise_taylor_vals = np.zeros((args.conv_channel_no, args.input_nc))
-
-                feed_dict = {}
-                current_dir = 'train' if args.test_training else 'test'
-                current_dir = os.path.join(args.name, current_dir)
-                if args.tile_only:
-                    if inference_entire_img_valid:
-                        feed_dict[h_start] = np.array([- padding_offset // 2]).astype('i')
-                        feed_dict[w_start] = np.array([- padding_offset // 2]).astype('i')
-
+                #from tensorflow.python.ops.parallel_for.gradients import jacobian
+                
+                #channelwise_jacobian = jacobian(channelwise_sum, debug_input)
+                #encoder_channelwise_taylors = tf.reduce_mean(tf.abs(channelwise_jacobian * tf.expand_dims(debug_input, 0)), (1, 2, 3))
+                
+                #encoder_channelwise_taylor_vals = np.zeros((args.input_nc, args.conv_channel_no))
+                
                 for i in range(len(val_img_names)):
-                    print(i)
+                    print(args.shader_name, i)
+
                     output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
 
                     camera_val = np.expand_dims(camera_pos_vals[i, :], axis=1)
@@ -2296,26 +2034,40 @@ def main_network(args):
                         feed_dict[w_start] = tile_start_vals[i:i+1, 1] - padding_offset // 2
 
                     feed_dict[output_pl] = output_ground
-                    
-                    current_total_taylor, current_channelwise_taylor = sess.run([total_loss_taylor,  encoder_channelwise_taylors], feed_dict=feed_dict)
-                    
-                    total_loss_taylor_vals += current_total_taylor
-                    encoder_channelwise_taylor_vals += current_channelwise_taylor
 
-                total_loss_taylor_vals /= len(val_img_names)
-                numpy.save(os.path.join(current_dir, 'total_loss_taylor_vals.npy'), total_loss_taylor_vals)
+                    current_channelwise_taylors = sess.run(encoder_channelwise_taylors, feed_dict=feed_dict)
+
+                    encoder_channelwise_taylor_vals += current_channelwise_taylors
                 
                 encoder_channelwise_taylor_vals /= len(val_img_names)
-                numpy.save(os.path.join(current_dir, 'encoder_channelwise_taylor_vals.npy'), encoder_channelwise_taylor_vals)
+                
+                if start_ch == 0:
+                    numpy.save(os.path.join(current_dir, 'encoder_channelwise_taylor_vals_%s.npy' % args.shader_name), encoder_channelwise_taylor_vals)
+                else:
+                    old_vals = np.load(os.path.join(current_dir, 'encoder_channelwise_taylor_vals_%s.npy' % args.shader_name))
+                    assert old_vals.shape == (start_ch, args.input_nc)
+                    new_vals = np.concatenate((old_vals, encoder_channelwise_taylor_vals), 0)
+                    numpy.save(os.path.join(current_dir, 'encoder_channelwise_taylor_vals_%s.npy' % args.shader_name), new_vals)
 
+                
                 valid_inds = np.load(os.path.join(args.name, 'valid_inds.npy'))
                 
                 print('max channelwise ind')
+                str_max_channelwise_ind = ''
                 for i in range(encoder_channelwise_taylor_vals.shape[0]):
                     max_channelwise_ind = np.argsort(encoder_channelwise_taylor_vals[i])[::-1]
-                    print(i, ':, ', valid_inds[max_channelwise_ind[:5]])
-
-                return
+                    print(i + start_ch, ':, ', valid_inds[max_channelwise_ind[:5]])
+                    str_max_channelwise_ind += 'encoder channel %d:\n' % (i + start_ch)
+                    str_max_channelwise_ind += ', '.join([str(ind) for ind in valid_inds[max_channelwise_ind[:20]]])
+                    str_max_channelwise_ind += '\n'
+                
+                if start_ch == 0:
+                    access = 'w'
+                else:
+                    access = 'a'
+                open(os.path.join(current_dir, 'encoder_max_channelwise_ind_%s.txt' % args.shader_name), access).write(str_max_channelwise_ind)        
+                
+                continue
 
             if args.is_train:
                 if args.write_summary:
