@@ -1346,6 +1346,7 @@ def prepare_data_root(dataroot, additional_input=False):
     val_grad_names = []
     add_names = []
     val_add_names = []
+    validate_add_names = []
     
     validate_img_names = []
 
@@ -1366,12 +1367,16 @@ def prepare_data_root(dataroot, additional_input=False):
     if additional_input:
         train_add_dir = os.path.join(dataroot, 'train_add')
         test_add_dir = os.path.join(dataroot, 'test_add')
+        validate_add_dir = os.path.join(dataroot, 'validate_add')
+        
         for file in sorted(os.listdir(train_add_dir)):
             add_names.append(os.path.join(train_add_dir, file))
         for file in sorted(os.listdir(test_add_dir)):
             val_add_names.append(os.path.join(test_add_dir, file))
+        for file in sorted(os.listdir(validate_add_dir)):
+            validate_add_names.append(os.path.join(validate_add_dir, file))
 
-    return output_names, val_img_names, map_names, val_map_names, grad_names, val_grad_names, add_names, val_add_names, validate_img_names
+    return output_names, val_img_names, map_names, val_map_names, grad_names, val_grad_names, add_names, val_add_names, validate_img_names, validate_add_names
 
 def save_obj(obj, name ):
     with open(name, 'wb') as f:
@@ -1891,7 +1896,7 @@ def main_network(args):
 
     if args.use_dataroot:
         if not args.shader_name.startswith('boids'):
-            output_names, val_img_names, map_names, val_map_names, grad_names, val_grad_names, add_names, val_add_names, validate_img_names = prepare_data_root(args.dataroot, additional_input=args.additional_input)
+            output_names, val_img_names, map_names, val_map_names, grad_names, val_grad_names, add_names, val_add_names, validate_img_names, validate_add_names = prepare_data_root(args.dataroot, additional_input=args.additional_input)
             if args.test_training:
                 val_img_names = output_names
                 val_map_names = map_names
@@ -4113,6 +4118,11 @@ def main_network(args):
 
                 for name in validate_img_names:
                     validate_imgs.append(np.expand_dims(read_name(name, False, False), 0))
+                    
+                if args.additional_input:
+                    all_adds = np.empty([len(validate_add_names), target_pl_h, target_pl_w, 1])
+                    for id in range(len(validate_add_names)):
+                        all_adds[id, :, :, 0] = read_name(validate_add_names[id], True)
                 
             # stored in the order of
             # epoch, current, current_l2, current_perceptual, current_gen, current_discrim
@@ -4159,6 +4169,9 @@ def main_network(args):
                         else:
                             feed_dict[h_start] = np.array([- padding_offset / 2])
                             feed_dict[w_start] = np.array([- padding_offset / 2])
+                            
+                        if args.additional_input:
+                            feed_dict[additional_input_pl] = all_ads[ind:ind+1]
                     else:
                         feed_dict = {}
                     
