@@ -4118,6 +4118,11 @@ def main_network(args):
 
                 for name in validate_img_names:
                     validate_imgs.append(np.expand_dims(read_name(name, False, False), 0))
+                    
+                if args.additional_input:
+                    all_adds = np.empty([len(validate_add_names), target_pl_h, target_pl_w, 1])
+                    for id in range(len(validate_add_names)):
+                        all_adds[id, :, :, 0] = read_name(validate_add_names[id], True)
                 
             # stored in the order of
             # epoch, current, current_l2, current_perceptual, current_gen, current_discrim
@@ -4164,6 +4169,9 @@ def main_network(args):
                         else:
                             feed_dict[h_start] = np.array([- padding_offset / 2])
                             feed_dict[w_start] = np.array([- padding_offset / 2])
+                            
+                        if args.additional_input:
+                            feed_dict[additional_input_pl] = all_ads[ind:ind+1]
                     else:
                         feed_dict = {}
                     
