@@ -77,7 +77,7 @@ for line in ind_strs:
                     trace_dict[inds[i]] = ans
                     pickle.dump( trace_dict, open( save_trace_dict_file, "wb" ) )
                     
-                summary_str += '%d (%s)\n' % (inds[i], trace_dict[inds[i]])
+                summary_str += '%d %.3f (%s)\n' % (inds[i], current_score[i], trace_dict[inds[i]])
 
 summary_str = 'Looking for at most 20 feature with contribution score > %f\n\n' % thre + summary_str
 open(os.path.join(dir, 'auto_generated_summary_%s.txt' % shadername), 'w').write(summary_str)
