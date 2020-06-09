@@ -4171,7 +4171,7 @@ def main_network(args):
                             feed_dict[w_start] = np.array([- padding_offset / 2])
                             
                         if args.additional_input:
-                            feed_dict[additional_input_pl] = all_vals[ind:ind+1]
+                            feed_dict[additional_input_pl] = all_adds[ind:ind+1]
                     else:
                         feed_dict = {}
                     
