@@ -1506,9 +1506,7 @@ def main_network(args):
     
     T0 = time.time()
     
-    # DOGE: debug only
-    #for global_e in range(args.which_epoch + 1, global_epoch + 1):
-    for global_e in range(24, global_epoch + 1):
+    for global_e in range(args.which_epoch + 1, global_epoch + 1):
         
         print(global_e)
         
@@ -2021,7 +2019,7 @@ def main_network(args):
                 #encoder_channelwise_taylor_vals = np.zeros((args.input_nc, args.conv_channel_no))
                 
                 for i in range(len(val_img_names)):
-                    print(args.shader_name, i)
+                    print(args.shader_name, start_ch, i)
 
                     output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
 
