@@ -1573,6 +1573,7 @@ def generate_parser():
     parser.add_argument('--feed_dict_optimize_input', dest='feed_dict_optimize_input', action='store_true', help='if specified, create pl for optimize input mode, instead of variable')
     parser.add_argument('--finite_diff', dest='finite_diff', action='store_true', help='if specified, create 2 extra copy of camera_pos and shader_time in the batch dimension that can be used to compute finite difference later')
     parser.add_argument('--collect_validate_loss', dest='collect_validate_loss', action='store_true', help='if true, collect validation loss (and training score) and write to tensorboard')
+    parser.add_argument('--alt_ckpt_base_dir', dest='alt_ckpt_base_dir', default='', help='if specified, also find checkpoints here')
     parser.add_argument('--read_from_best_validation', dest='read_from_best_validation', action='store_true', help='if true, read from the best validation checkpoint')
     parser.add_argument('--feature_normalize_lo_pct', dest='feature_normalize_lo_pct', type=int, default=25, help='used to find feature_bias file')
     parser.add_argument('--get_col_aux_inds', dest='get_col_aux_inds', action='store_true', help='if true, write the inds for color and aux channels and do nothing else')
@@ -1743,6 +1744,7 @@ def copy_option(args):
     delattr(new_args, 'test_output_dir')
     delattr(new_args, 'name')
     delattr(new_args, 'overwrite_option_file')
+    delattr(new_args, 'alt_ckpt_base_dir')
     return new_args
 
 def main_network(args):
@@ -4108,6 +4110,14 @@ def main_network(args):
             assert args.test_training
             dirs = sorted(os.listdir(args.name))
             
+            if args.alt_ckpt_base_dir != '':
+                old_dirs = set(dirs)
+                _, model_name = os.path.split(args.name)
+                alt_name = os.path.join(args.alt_ckpt_base_dir, model_name)
+                alt_dirs = set(os.listdir(alt_name))
+                all_dirs = set.union(old_dirs, alt_dirs)
+                dirs = sorted(list(all_dirs))
+            
             if not args.use_queue:
                 camera_pos_vals = np.load(os.path.join(args.dataroot, 'validate.npy'))
                 time_vals = np.load(os.path.join(args.dataroot, 'validate_time.npy'))
@@ -4171,7 +4181,7 @@ def main_network(args):
                             feed_dict[w_start] = np.array([- padding_offset / 2])
                             
                         if args.additional_input:
-                            feed_dict[additional_input_pl] = all_ads[ind:ind+1]
+                            feed_dict[additional_input_pl] = all_adds[ind:ind+1]
                     else:
                         feed_dict = {}
                     
