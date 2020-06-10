@@ -1958,6 +1958,11 @@ def main_network(args):
                 
                 if not os.path.isdir(current_dir):
                     os.makedirs(current_dir)
+                    
+                valid_inds = np.load(os.path.join(args.name, 'valid_inds.npy'))
+                
+                if specified_ind is not None:
+                    valid_inds = valid_inds[specified_ind]
                 
                 if args.tile_only:
                     if inference_entire_img_valid:
@@ -2048,7 +2053,7 @@ def main_network(args):
                     numpy.save(os.path.join(current_dir, 'encoder_channelwise_taylor_vals_%s.npy' % args.shader_name), new_vals)
 
                 
-                valid_inds = np.load(os.path.join(args.name, 'valid_inds.npy'))
+                
                 
                 print('max channelwise ind')
                 str_max_channelwise_ind = ''
