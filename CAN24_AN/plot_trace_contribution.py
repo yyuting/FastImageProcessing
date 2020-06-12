@@ -411,7 +411,7 @@ def main():
                 if shader_count in [2, 4]:
                     if shader_count == 4:
                         keys = ['good_oracle', 'bad_oracle', 'subsample', 'all']
-                        labels = ['Error: Oracle', 'Error: Opponent', 'Error: Uniform', 'Error: All Trace', ]
+                        labels = ['Error: Oracle', 'Error: Opponent', 'Error: Uniform', 'Error: Full Trace', ]
                     elif shader_count == 2:
                         keys = ['RGBx', 'runtime', 'RGBx_runtime']
                         labels = ['Error: RGBx', 'Runtime: Ours', 'Runtime: RGBx']
