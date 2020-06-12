@@ -3692,6 +3692,8 @@ def main_network(args):
         print('max activation for g_current:')
         print(valid_inds[max_g_current_ind[:20]])
         return
+    
+    saved_meta = False
 
     if args.is_train:
         if args.write_summary:
@@ -4080,6 +4082,15 @@ def main_network(args):
             #target = open("%s/%04d/score_breakdown.txt"%(args.name,epoch),'w')
             #target.write("%f, %f, %f, %f"%(avg_test_close, avg_test_far, avg_test_middle, avg_test_all))
             #target.close()
+            
+            if epoch % args.save_frequency == 0:
+                for s_i in range(len(savers)):
+                    ckpt_dir = os.path.join("%s/%04d"%(args.name,epoch), save_names[s_i])
+                    if not os.path.isdir(ckpt_dir):
+                        os.makedirs(ckpt_dir)
+                    savers[s_i].save(sess,"%s/model.ckpt" % ckpt_dir, write_meta_graph=(not saved_meta))
+                    
+            saved_meta = True
 
             if update_current_epoch:
                 for s_i in range(len(savers)):
@@ -4087,12 +4098,7 @@ def main_network(args):
                     if not os.path.isdir(ckpt_dir):
                         os.makedirs(ckpt_dir)
                     savers[s_i].save(sess,"%s/model.ckpt" % ckpt_dir)
-            if epoch % args.save_frequency == 0:
-                for s_i in range(len(savers)):
-                    ckpt_dir = os.path.join("%s/%04d"%(args.name,epoch), save_names[s_i])
-                    if not os.path.isdir(ckpt_dir):
-                        os.makedirs(ckpt_dir)
-                    savers[s_i].save(sess,"%s/model.ckpt" % ckpt_dir)
+            
 
         #var_list_gconv1 = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='g_conv1')
         #g_conv1_dict = {}
