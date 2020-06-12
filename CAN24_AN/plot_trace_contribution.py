@@ -11,6 +11,8 @@ matplotlib.rcParams['xtick.minor.size'] = 0
 matplotlib.rcParams['xtick.minor.width'] = 0
 matplotlib.rcParams['ytick.minor.size'] = 0
 matplotlib.rcParams['ytick.minor.width'] = 0
+matplotlib.rcParams['xtick.direction'] = 'in'
+matplotlib.rcParams['ytick.direction'] = 'in'
 
 plot_rel_trace = True
 
@@ -225,11 +227,13 @@ def main():
     
     fig_total = plt.figure()
     fig_total.set_size_inches(7, 7)
-        
+            
     for shader_name in shader_names:
         shader_datas = slicing_datas[shader_name]
         
         plt.figure(fig_total.number)
+
+               
         ax1 = plt.subplot(2, 2, shader_count)
         shader_count += 1
         
@@ -275,6 +279,8 @@ def main():
             fig.set_size_inches(7, 3.5)
             
             comparisons = {}
+            
+            handles = {}
 
             for category in all_plot_datas.keys():
 
@@ -282,20 +288,33 @@ def main():
                 
                 current_trace = all_plot_datas[category]['trace']
                 
+                
+                
                 if plot_rel_trace:
                     current_trace = 2. ** (-np.arange(current_trace.shape[0]) - 1)
-
+                    
+                    
+                    
                 plt.plot(current_trace, current_perceptual, 'o', linewidth=10, markeredgewidth=markeredgewidth, label=category, color=colors[category])
                 
                 if metric == 'perceptual':
                     plt.figure(fig_total.number)
-                    plt.plot(current_trace, current_perceptual / baseline_info[metric], 'o', linewidth=10, markeredgewidth=markeredgewidth, label=category, color=colors[category])
+                    
+                    if shader_count == 5:
+                        current_trace[-1] *= 2 ** 0.5
+                    
+                    handle = plt.plot(current_trace, current_perceptual / baseline_info[metric], 'o', linewidth=10, markeredgewidth=markeredgewidth, label=category, color=colors[category])
+                    handles[category] = handle[0]
                 
                     plt.figure(fig.number)
 
                 current_perceptual = np.concatenate((current_perceptual, np.array([baseline_info[metric]])))
                 if plot_rel_trace:
                     current_trace = np.concatenate((current_trace, [2. ** (-current_trace.shape[0] - 1)]))
+                    
+                    if shader_count == 5:
+                        current_trace[-1] *= 2
+                    
                 else:
                     current_trace = np.concatenate((current_trace, np.array([baseline_info['trace']])))
 
@@ -325,14 +344,19 @@ def main():
             
             if metric == 'perceptual':
                 plt.figure(fig_total.number)
-                plt.plot([current_trace[-1]], [1.0], 's', linewidth=10, markeredgewidth=markeredgewidth, label='RGBx', color=colors['RGBx'])
-                plt.title(shader_name)
+                handle = plt.plot([current_trace[-1]], [1.0], 's', linewidth=10, markeredgewidth=markeredgewidth, label='RGBx', color=colors['RGBx'])
+                handles['RGBx'] = handle[0]
+                #plt.title(shader_name)
                 
                 all_runtime = np.concatenate(([baseline_info['all_runtime']], all_plot_datas['subsample']['runtime'], [baseline_info['runtime']]))
                 
                 all_runtime /= all_runtime[0]
                 
-                plt.plot(current_trace, all_runtime, '^', markeredgewidth=markeredgewidth, color=colors['runtime'], zorder=1, label='runtime')
+                handle = plt.plot(current_trace[:-1], all_runtime[:-1], 'p', markeredgewidth=markeredgewidth, color=colors['runtime'], zorder=1, label='runtime')
+                handles['runtime'] = handle[0]
+                
+                handle = plt.plot(current_trace[-1], all_runtime[-1], 's', markeredgewidth=markeredgewidth, color=colors['runtime'], zorder=1, label='runtime')
+                handles['RGBx_runtime'] = handle[0]
                 plt.plot(current_trace, all_runtime, linewidth=2.5, color=colors['runtime'], zorder=1)
                 
                 #ax2 = ax1.twinx()
@@ -340,23 +364,58 @@ def main():
                 #ax2.plot(current_trace, 10 + np.arange(current_trace.shape[0])[::-1], linewidth=2.5, color=colors['runtime'], zorder=1)
                 #ax2.set_ylim(0, 20)
                 
-                ax1.plot([current_trace[0]], [baseline_info['all_perceptual'] / baseline_info['perceptual']], 'p', linewidth=10, markeredgewidth=markeredgewidth, label='all trace', color=colors['all'])
+                handle = ax1.plot([current_trace[0]], [baseline_info['all_perceptual'] / baseline_info['perceptual']], 'o', linewidth=10, markeredgewidth=markeredgewidth, label='all trace', color=colors['all'])
+                handles['all'] = handle[0]
                 
                 #ax1.set_zorder(ax2.get_zorder()+1)
                 #ax1.patch.set_visible(False)
                 
                 ax1.set_ylim(0.1, 1.1)
                 
-                if shader_count % 2 == 1:
-                    plt.yticks([], [])
+                
+                                    
+                
                     
                 plt.xscale('log')
                 
-                if plot_rel_trace:
-                    x_tick_labels = ['1/%d' % (d + 1) for d in range(current_trace.shape[0])]
-                    x_tick_labels[0] = '1'
-                    x_tick_labels[-1] = '0'
-                    plt.xticks(current_trace, x_tick_labels)
+                
+                plt.yticks(np.arange(0.2, 1.1, 0.2))
+
+                if shader_count % 2 == 1:
+                    # shaders on 2nd column
+                    #plt.yticks([])
+                    ax1.yaxis.set_ticklabels([])
+                else:
+                    ax1.yaxis.tick_right()
+                    
+                
+
+                if shader_count > 3:
+                    ax1.xaxis.tick_top()
+                    
+                    plt.xticks(current_trace, [''] * current_trace.shape[0])
+                    
+                    if shader_count == 5:
+                        plt.xticks(np.concatenate((current_trace[:-2], current_trace[-1:])), [''] * (current_trace.shape[0] - 1))
+                                   
+                else:
+                    if plot_rel_trace:
+                        x_tick_labels = ['1/%d' % (d + 1) for d in range(current_trace.shape[0])]
+                        x_tick_labels[0] = '1'
+                        x_tick_labels[-1] = '0'
+                        
+                        plt.xticks(current_trace, x_tick_labels)
+                        
+                ax1.text(0.05, 0.05, shader_name.replace(shader_name[0], shader_name[0].upper()), horizontalalignment='left', verticalalignment='bottom', transform = ax1.transAxes, fontsize=fontsize)
+                
+                if shader_count in [2, 4]:
+                    if shader_count == 4:
+                        keys = ['good_oracle', 'bad_oracle', 'subsample', 'all']
+                        labels = ['Error: Oracle', 'Error: Opponent', 'Error: Uniform', 'Error: All Trace', ]
+                    elif shader_count == 2:
+                        keys = ['RGBx', 'runtime', 'RGBx_runtime']
+                        labels = ['Error: RGBx', 'Runtime: Ours', 'Runtime: RGBx']
+                    ax1.legend([handles[key] for key in keys], labels, loc='lower left', bbox_to_anchor=(0.00, 0.15), fontsize=fontsize)
                 
                 plt.figure(fig.number)
 
@@ -388,9 +447,12 @@ def main():
         
     plt.figure(fig_total.number)
     plt.tight_layout()
+    
+    plt.subplots_adjust(wspace=0.095, hspace=0.07)
 
     plt.savefig(os.path.join('result_figs', 'test.png'))
     plt.close(fig_total)
+    
        
     assert total_count['l2'] == total_count['perceptual']
     
