@@ -1226,6 +1226,7 @@ def generate_parser():
     parser.add_argument('--epoch_per_shader', dest='epoch_per_shader', type=int, default=1, help='number of epochs run per shader')
     parser.add_argument('--multiple_feature_reduction_ch', dest='multiple_feature_reduction_ch', default='', help='specifies different feature reduction ch for different shader')
     parser.add_argument('--choose_shaders', dest='choose_shaders', type=int, default=0, help='specifies which set of shaders to use')
+    parser.add_argument('--alt_dataroot', dest='alt_dataroot', default='', help='specifies alternate dataroot used to replace hard-coded dataroot')
     
     parser.set_defaults(is_train=False)
     parser.set_defaults(use_batch=False)
@@ -1329,6 +1330,7 @@ def copy_option(args):
     delattr(new_args, 'test_output_dir')
     delattr(new_args, 'name')
     delattr(new_args, 'overwrite_option_file')
+    delattr(new_args, 'alt_dataroot')
     return new_args
 
 def main_network(args):
@@ -1503,6 +1505,11 @@ def main_network(args):
         assert len(multiple_feature_reduction_ch) == len(all_shaders)
     else:
         multiple_feature_reduction_ch = None
+        
+    alt_dataroot = None
+    if args.alt_dataroot != '':
+        alt_dataroot = args.alt_dataroot.split(',')
+        assert len(alt_dataroot) == len(all_shaders)
     
     T0 = time.time()
     
@@ -1522,6 +1529,9 @@ def main_network(args):
             sess = tf.Session()
 
             shader_name, geometry, dataroot, extra_args = all_shaders[shader_ind]
+            
+            if alt_dataroot is not None:
+                dataroot = alt_dataroot[shader_ind]
 
             print('running shader %s' % shader_name)
 
