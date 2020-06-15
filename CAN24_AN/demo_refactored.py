@@ -2723,8 +2723,22 @@ def main_network(args):
                 reduced_dim_feature = input_to_network
                 
                 if args.add_initial_layers:
+                    
                     for nlayer in range(3):
-                        input_to_network = slim.conv2d(input_to_network, actual_initial_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(allow_map_to_less=True), scope='initial_'+str(nlayer), weights_regularizer=regularizer, padding=conv_padding)            
+                        if ndims == 2:
+                            input_to_network = slim.conv2d(input_to_network, actual_initial_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(allow_map_to_less=True), scope='initial_'+str(nlayer), weights_regularizer=regularizer, padding=conv_padding)      
+                        else:
+                            
+                            #w_shape = [1, args.input_nc, actual_initial_layer_channels]
+                            #conv = tf.nn.conv1d
+                            #strides = 1
+                            #weights = tf.get_variable('w0', w_shape, initializer=tf.contrib.layers.xavier_initializer() if not args.identity_initialize else identity_initializer(color_inds, ndims=ndims), regularizer=regularizer)
+
+                            #weights_to_input = weights
+
+                            #input_to_network = conv(input_to_network, weights_to_input, strides, "SAME")
+                            
+                            input_to_network = slim.conv1d(input_to_network, actual_initial_layer_channels, 1, rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(allow_map_to_less=True, ndims=1), scope='initial_'+str(nlayer), weights_regularizer=regularizer, padding=conv_padding)      
 
                 if args.geometry.startswith('boids'):
                     # 1D case
