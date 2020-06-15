@@ -452,7 +452,11 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                 
                 new_features = []
                 for ind in specified_ind_vals:
-                    new_features.append(out_features[ind])
+                    if ind < len(out_features):
+                        new_features.append(out_features[ind])
+                    else:
+                        assert shader_name.startswith('boids')
+                        assert ind < len(out_features) + int(texture_maps.shape[-1])
                 out_features = new_features
                 
                 feature_bias = feature_bias[specified_ind_vals]
@@ -470,6 +474,12 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                         if isinstance(vec, tf.Tensor):
                             actual_ind = out_features.index(vec)
                             color_inds.append(actual_ind)
+                            
+                if shader_name.startswith('boids'):
+                    # add input texture
+                    for i in range(int(texture_maps.shape[-1])):
+                        color_inds.append(len(out_features) + i)
+                        
                 if alt_dir == '':
                     np.save(os.path.join(name, 'col_aux_inds.npy'), color_inds)
                 else:
@@ -1745,6 +1755,7 @@ def copy_option(args):
     delattr(new_args, 'name')
     delattr(new_args, 'overwrite_option_file')
     delattr(new_args, 'alt_ckpt_base_dir')
+    delattr(new_args, 'boids_seq_metric')
     return new_args
 
 def main_network(args):
@@ -2302,56 +2313,58 @@ def main_network(args):
             else:
                 #camera_pos = tf.placeholder(dtype, shape=[33, args.batch_size])
                 camera_pos_len = 33
-        if args.optimize_input:
-            assert args.use_dataroot
-            # normalize camera pos and shader time according to training data
-            camera_pos_training_pool = numpy.load(os.path.join(args.dataroot, 'train.npy'))
-            camera_pos_bias = np.expand_dims(-np.min(camera_pos_training_pool, 0), 1)
-            
-            camera_pos_scale_raw = np.max(camera_pos_training_pool, 0) - np.min(camera_pos_training_pool, 0)
-            camera_pos_scale = numpy.ones(camera_pos_scale_raw.shape)
-            camera_pos_scale[camera_pos_scale_raw.nonzero()] = camera_pos_scale_raw[camera_pos_scale_raw.nonzero()]
-            camera_pos_scale = np.expand_dims(camera_pos_scale, 1)
-            
-            shader_time_training_pool = numpy.load(os.path.join(args.dataroot, 'train_time.npy'))
-            shader_time_bias = -numpy.min(shader_time_training_pool)
-            shader_time_scale = np.max(shader_time_training_pool) + shader_time_bias
-            if shader_time_scale == 0:
-                shader_time_scale = 1
-            
-            #camera_pos_var = tf.Variable(np.zeros([camera_pos_len, args.batch_size]), dtype=dtype)
-            if args.feed_dict_optimize_input:
-                camera_pos_var = tf.placeholder(dtype, shape=[camera_pos_len, args.batch_size])
-                shader_time_var = tf.placeholder(dtype, shape=args.batch_size)
+            if args.optimize_input:
+                assert args.use_dataroot
+                # normalize camera pos and shader time according to training data
+                camera_pos_training_pool = numpy.load(os.path.join(args.dataroot, 'train.npy'))
+                camera_pos_bias = np.expand_dims(-np.min(camera_pos_training_pool, 0), 1)
+
+                camera_pos_scale_raw = np.max(camera_pos_training_pool, 0) - np.min(camera_pos_training_pool, 0)
+                camera_pos_scale = numpy.ones(camera_pos_scale_raw.shape)
+                camera_pos_scale[camera_pos_scale_raw.nonzero()] = camera_pos_scale_raw[camera_pos_scale_raw.nonzero()]
+                camera_pos_scale = np.expand_dims(camera_pos_scale, 1)
+
+                shader_time_training_pool = numpy.load(os.path.join(args.dataroot, 'train_time.npy'))
+                shader_time_bias = -numpy.min(shader_time_training_pool)
+                shader_time_scale = np.max(shader_time_training_pool) + shader_time_bias
+                if shader_time_scale == 0:
+                    shader_time_scale = 1
+
+                #camera_pos_var = tf.Variable(np.zeros([camera_pos_len, args.batch_size]), dtype=dtype)
+                if args.feed_dict_optimize_input:
+                    camera_pos_var = tf.placeholder(dtype, shape=[camera_pos_len, args.batch_size])
+                    shader_time_var = tf.placeholder(dtype, shape=args.batch_size)
+                else:
+                    camera_pos_var = tf.Variable((camera_pos_training_pool[:args.batch_size].transpose() + camera_pos_bias) / camera_pos_scale, dtype=dtype)
+                    shader_time_var = tf.Variable(np.zeros(args.batch_size), dtype=dtype)
+
+
+                if args.finite_diff:
+                    finite_h = 1e-2
+                    # for computational efficientcy we only add 7 more examples, finite diff will be computed as
+                    # (f(x + h) - f(x)) / h
+
+                    shader_time_finite = tf.concat((tf.tile(shader_time_var, [7]), shader_time_var + finite_h), 0)
+
+                    camera_stacks = [camera_pos_var]                            
+                    current_finite = np.zeros(6)    
+                    for i in range(6):
+                        current_finite[:] = 0
+                        current_finite[i] = finite_h
+                        camera_stacks.append(camera_pos_var + np.expand_dims(current_finite, 1))
+                    camera_stacks.append(camera_pos_var)
+
+                    camera_pos_finite = tf.concat(camera_stacks, 1)
+                else:
+                    shader_time_finite = shader_time_var
+                    camera_pos_finite = camera_pos_var
+
+                camera_pos = camera_pos_finite * camera_pos_scale - camera_pos_bias
+                shader_time = shader_time_finite * shader_time_scale - shader_time_bias
             else:
-                camera_pos_var = tf.Variable((camera_pos_training_pool[:args.batch_size].transpose() + camera_pos_bias) / camera_pos_scale, dtype=dtype)
-                shader_time_var = tf.Variable(np.zeros(args.batch_size), dtype=dtype)
-                
-                
-            if args.finite_diff:
-                finite_h = 1e-2
-                # for computational efficientcy we only add 7 more examples, finite diff will be computed as
-                # (f(x + h) - f(x)) / h
-                
-                shader_time_finite = tf.concat((tf.tile(shader_time_var, [7]), shader_time_var + finite_h), 0)
-                
-                camera_stacks = [camera_pos_var]                            
-                current_finite = np.zeros(6)    
-                for i in range(6):
-                    current_finite[:] = 0
-                    current_finite[i] = finite_h
-                    camera_stacks.append(camera_pos_var + np.expand_dims(current_finite, 1))
-                camera_stacks.append(camera_pos_var)
-                
-                camera_pos_finite = tf.concat(camera_stacks, 1)
-            else:
-                shader_time_finite = shader_time_var
-                camera_pos_finite = camera_pos_var
-                
-            camera_pos = camera_pos_finite * camera_pos_scale - camera_pos_bias
-            shader_time = shader_time_finite * shader_time_scale - shader_time_bias
+                camera_pos = tf.placeholder(dtype, shape=[camera_pos_len, args.batch_size])
+                shader_time = tf.placeholder(dtype, shape=args.batch_size)
         else:
-            camera_pos = tf.placeholder(dtype, shape=[camera_pos_len, args.batch_size])
             shader_time = tf.placeholder(dtype, shape=args.batch_size)
     if args.additional_input:
         additional_input_pl = tf.placeholder(dtype, shape=[None, output_pl_h, output_pl_w, 1])
@@ -4590,7 +4603,8 @@ def main_network(args):
                         numpy.save(os.path.join(debug_dir, 'all_error.npy'), all_error)
                         #loss_prob = np.sum(np.mean(all_l2, 1) * sample_p)
                         #open("%s/all_loss.txt"%debug_dir, 'w').write("%f, %f"%(np.mean(all_l2), loss_prob))
-                        #open("%s/all_time.txt"%debug_dir, 'w').write("%f"%(np.median(all_time)))
+                        open("%s/all_loss.txt"%debug_dir, 'w').write("%f"%(np.mean(all_l2)))
+                        open("%s/all_time.txt"%debug_dir, 'w').write("%f"%(np.median(all_time)))
                         print("all times saved")
 
                 else:
