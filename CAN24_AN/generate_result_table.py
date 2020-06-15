@@ -26,148 +26,115 @@ hue_shaders = {
 teaser_app = 'simplified'
 teaser_shader = 'venice'
 
+model_parent_dir = '/mnt/shadermlnfs1/shadermlvm/playground/models/'
+dataset_parent_dir = '/mnt/shadermlnfs1/shadermlvm/playground/datasets/'
+
+score_pl = 0.0
+img_pl = np.zeros((640, 960, 3))
+
 app_shader_dir_200 = {
 'denoising': {
-    'bricks': {'dir': ['1x_1sample_bricks_dfs_no_rotation/test/',
-                       '1x_1sample_bricks_dfs_no_rotation_aux/test/',
-                       '1x_1sample_bricks_dfs_no_rotation/mean1_test/'],
-               'img_idx': 6,
+    'bricks': {'dir': ['1x_1sample_bricks_with_bg_all/test/',
+                       '1x_1sample_bricks_with_bg_aux_largest_capacity/test/',
+                       '1x_1sample_bricks_with_bg_all/mean1_test/'],
+               'img_idx': 9,
                'img_zoom_bbox': [240, 320, -190, -130],
-               'gt_dir': '/n/fs/shaderml/datas_bricks_dsf/test_img',
+               'gt_dir': 'datas_bricks_normal_texture/test_img',
                'msaa_sample': 1,
                'print': 'Bricks'
               },
-    #'marble': {'dir': ['1x_1sample_marble_automatic_200/test/',
-    #                   '1x_1sample_marble_automatic_200_aux/test/',
-    #                   '1x_1sample_marble_automatic_200/mean1_test/'],
-    #           'img_idx': 25,
-    #           'img_zoom_bbox': [220, 220+80, 3, 3+60],
-    #           'gt_dir': '/n/fs/shaderml/datas_marble_automatic_200/test_img',
-    #           'msaa_sample': 1
-    #          },
-    'marble2': {'dir': ['1x_1sample_marble_automatic_200/test/',
-                       '1x_1sample_marble_automatic_200_aux/test/',
-                       '1x_1sample_marble_automatic_200/mean1_test/'],
-               'img_idx': 6,
-               'img_zoom_bbox': [500, 500+80, 760, 760+60],
-               'gt_dir': '/n/fs/shaderml/datas_marble_automatic_200/test_img',
-               'msaa_sample': 1,
-               'print': 'Marble'
-              },
-    'mandelbrot': {'dir': ['1x_1sample_mandelbrot_tile_automatic_200_repeat/test/',
-                           '1x_1sample_mandelbrot_tile_automatic_200_aux_repeat/test/',
-                           '1x_1sample_mandelbrot_tile_automatic_200_repeat/mean3_test/'],
-                   'img_idx': 8,
+    'mandelbrot': {'dir': ['1x_1sample_mandelbrot_with_bg_stratified_subsample_2/test/',
+                           '1x_1sample_mandelbrot_with_bg_aux_largest_capacity/test/',
+                           '1x_1sample_mandelbrot_with_bg_all/mean3_test/'],
+                   'img_idx': 9,
                    'img_zoom_bbox': [550, 550+80, 500, 500+60],
-                   'gt_dir': '/n/fs/shaderml/datas_mandelbrot_tile_automatic_200/test_img',
+                   'gt_dir': 'datas_mandelbrot/test_img',
                    'msaa_sample': 3,
                    'print': 'Mandelbrot'
                   },
-    'mandelbulb': {'dir': ['1x_1sample_mandelbulb_automatic_200/test/',
-                           '1x_1sample_mandelbulb_automatic_200_aux/test/',
-                           '1x_1sample_mandelbulb_automatic_200/mean3_test/'],
-                   'img_idx': 7,
+    'mandelbulb': {'dir': ['1x_1sample_mandelbulb_with_bg_all/test/',
+                           '1x_1sample_mandelbulb_with_bg_aux_largest_capacity/test/',
+                           '1x_1sample_mandelbulb_with_bg_all/mean3_test/'],
+                   'img_idx': 20,
                    'img_zoom_bbox': [370, 370+80, 370, 370+60],
                    'crop_box': [200, 640, 70, -230],
-                   'gt_dir': '/n/fs/shaderml/datas_mandelbulb_automatic_200/test_img',
+                   'gt_dir': 'datas_mandelbulb/test_img',
                    'msaa_sample': 3,
                    'print': 'Mandelbulb'
                   },
-    #'mandelbulb2': {'dir': ['1x_1sample_mandelbulb_automatic_200/test/',
-    #                       '1x_1sample_mandelbulb_automatic_200_aux/test/',
-    #                       '1x_1sample_mandelbulb_automatic_200/mean3_test/'],
-                   #'img_idx': 7,
-                   #'img_zoom_bbox': [370, 370+80, 370, 370+60],
-    #               'other_view': ['home/global_opt/proj/apps/out/mandelbulb_none_normal_none/video_gt00000.png',
-    #                              '1x_1sample_mandelbulb_automatic_200/render_ours/000001.png',
-    #                              '1x_1sample_mandelbulb_automatic_200_aux/render/000001.png',
-    #                              '1x_1sample_mandelbulb_automatic_200/render_mean3/000001.png'
-    #               ],
-    #               'img_zoom_bbox': [180, 180+80, 500, 500+60],
-    #               'gt_dir': '/n/fs/shaderml/datas_mandelbulb_automatic_200/test_img',
-    #               'msaa_sample': 3
-    #              },
-    'primitives': {'dir': ['1x_1sample_primitives_wheel_only_automatic_200/test/',
-                           '1x_1sample_primitives_wheel_only_automatic_200_aux/test/',
-                           '1x_1sample_primitives_wheel_only_automatic_200/mean1_test/'],
-                   'img_idx': 1,
+    'primitives': {'dir': ['1x_1sample_primitives_all/test_new/',
+                           '1x_1sample_primitives_aux_largest_capacity/test_new/',
+                           '1x_1sample_primitives_all/mean1_test/'],
+                   'img_idx': 15,
                    'img_zoom_bbox': [270, 270+80, 370, 370+60],
-                   'gt_dir': '/n/fs/shaderml/datas_primitives_wheel_only_automatic_200/test_img',
+                   'gt_dir': 'datas_primitives_correct_test_range/test_img',
                    'msaa_sample': 1,
                    'crop_box': [80, -180, 115, -275],
                    'print': 'Gear'
                   },
-    'trippy': {'dir': ['1x_1sample_trippy_heart_tile_automatic_dfs_200/test/',
-               '1x_1sample_trippy_heart_tile_automatic_dfs_200_aux/test/',
-               '1x_1sample_trippy_heart_tile_automatic_dfs_200/mean4_test/'],
-               'img_idx': 11,
+    'trippy': {'dir': ['1x_1sample_trippy_stratified_subsample_8/test_new/',
+               '1x_1sample_trippy_aux_largest_capacity/test_new/',
+               '1x_1sample_trippy_subsample_2/mean4_test/'],
+               'img_idx': 30,
                'img_zoom_bbox': [550, 550+80, 65, 65+60],
-               'gt_dir': '/n/fs/shaderml/datas_trippy_heart_tile_rotation_automatic_200/test_img',
+               'gt_dir': 'datas_trippy_new_extrapolation_subsample_2/test_img',
                'msaa_sample': 4,
                'print': 'Trippy Heart'
               },
-    'oceanic': {'dir': ['1x_1sample_oceanic_all_raymarching_automatic_200/test/',
-                '1x_1sample_oceanic_all_raymarching_automatic_200_aux/test/',
-                '1x_1sample_oceanic_all_raymarching_automatic_200/mean1_test/'],
-                #'img_idx': 14,
-                #'img_zoom_bbox': [280, 280+80, 530, 530+60],
-                'img_idx': 17,
+    'oceanic': {'dir': ['1x_1sample_oceanic_all/test/',
+                '1x_1sample_oceanic_aux_largest_capacity/test/',
+                '1x_1sample_oceanic_all/mean1_test/'],
+                'img_idx': 11,
                 'img_zoom_bbox': [280, 280+80, 750, 750+60],
-                'gt_dir': '/n/fs/shaderml/datas_oceanic_all_raymarching_automatic_200/test_img',
+                'gt_dir': 'datas_oceanic/test_img',
                 'msaa_sample': 1,
                 'print': 'Oceanic'
                },
-    'venice': {'dir': ['1x_1sample_venice_full_automatic_200/test/',
-               '1x_1sample_venice_full_proxy_automatic_400_with_initial_aux/test/',
-               '1x_1sample_venice_full_automatic_200/mean1_test/'],
-               'img_idx': 3,
+    'venice': {'dir': ['1x_1sample_venice_stratified_subsample_3/test_new/',
+               '1x_1sample_venice_aux_largest_capacity/test_new/',
+               '1x_1sample_venice_stratified_subsample_3/mean1_test/'],
+               'img_idx': 27,
                'img_zoom_bbox': [150, 150+80, 150, 150+60],
-               'gt_dir': '/n/fs/shaderml/datas_venice_100spp_focus_far_simplified_automatic_400/test_img',
+               'gt_dir': 'datas_venice_new_extrapolation/test_img',
                'msaa_sample': 1,
                'print': 'Venice'
               }
     },
 'simplified': {
-    'bricks': {'dir': ['1x_1sample_bricks_simplified_proxy/test/',
-               '1x_1sample_bricks_simplified_proxy_aux/test/',
+    'bricks': {'dir': ['1x_1sample_bricks_simplified_with_bg_all/test/',
+               '1x_1sample_bricks_simplified_with_bg_aux_largest_capacity/test/',
                '1x_1sample_bricks_simplified_proxy/mean1_test'],
-               'img_idx': 6,
-               'gt_dir': '/n/fs/shaderml/datas_bricks_dsf/test_img',
+               'img_idx': 15,
+               'gt_dir': 'datas_bricks_normal_texture/test_img',
                'print': 'Bricks'
               },
-    'mandelbrot': {'dir': ['1x_1sample_mandelbrot_simplified_proxy_all_trace_patchGAN_scale_005_update_8_long/test_zero_samples/test/',
-                   '1x_1sample_mandelbrot_simplified_proxy_all_trace_patchGAN_scale_005_update_8_long_aux/test/',
-                   '1x_1sample_mandelbrot_simplified_proxy_all_trace_patchGAN_scale_005_update_8_long/mean1_test/'],
-                   'img_idx': 8,
-                   'gt_dir': '/n/fs/shaderml/datas_mandelbrot_simplified_proxy/test_img',
+    'mandelbrot': {'dir': ['1x_1sample_mandelbrot_simplified_with_bg_all/test/',
+                   '1x_1sample_mandelbrot_simplified_with_bg_aux_largest_capacity/test/',
+                   '1x_1sample_mandelbrot_simplified_with_bg_all/mean1_test/'],
+                   'img_idx': 30,
+                   'gt_dir': 'datas_mandelbrot/test_img',
                    'print': 'Mandelbrot'
                   },
-    'mandelbulb': {'dir': ['1x_1sample_mandelbulb_simplified_automatic_200/test/',
-                   '1x_1sample_mandelbulb_simplified_automatic_200_aux/test/',
-                   '1x_1sample_mandelbulb_simplified_automatic_200/mean1_test/'],
-                   'other_view': ['mandelbulb_video_gt_f1.png',
-                                  '1x_1sample_mandelbulb_simplified_automatic_200/render_ours/000001.png',
-                                  '1x_1sample_mandelbulb_simplified_automatic_200_aux/render/000001.png',
-                                  '1x_1sample_mandelbulb_simplified_automatic_200/render_mean1/000001.png'],
+    'mandelbulb': {'dir': ['1x_1sample_mandelbulb_with_bg_siimplified_all/test/',
+                   '1x_1sample_mandelbulb_simplified_with_bg_aux_largest_capacity/test/',
+                   '1x_1sample_mandelbulb_with_bg_siimplified_all/mean1_test/'],
+                   'img_idx': 12,
+                   'gt_dir': 'datas_mandelbulb/test_img',
                    'print': 'Mandelbulb'
                   },
-    'trippy': {'dir': ['1x_1sample_trippy_heart_simplified_proxy_dfs_automatic_200/test/',
-               '1x_1sample_trippy_heart_simplified_proxy_dfs_automatic_200_aux/test/',
-               '1x_1sample_trippy_heart_simplified_proxy_dfs_automatic_200/mean1_test'],
-               'img_idx': 11,
-               'gt_dir': '/n/fs/shaderml/datas_trippy_heart_simplified_proxy_dfs_automatic_200/test_img',
+    'trippy': {'dir': ['1x_1sample_trippy_simplified_stratified_subsample_4/test_new/',
+               '1x_1sample_trippy_simplified_aux_largest_capacity/test_new/',
+               '1x_1sample_trippy_simplified_all/mean1_test'],
+               'img_idx': 30,
+               'gt_dir': 'datas_trippy_new_extrapolation_subsample_2/test_img',
                'print': 'Trippy Heart'
               },
-    'venice': {'dir': ['1x_1sample_venice_100spp_simplified_30_70_automatic_200/test/',
-                       '1x_1sample_venice_100spp_simplified_30_70_aux/test/',
-                       '1x_1sample_venice_100spp_simplified_30_70_automatic_200/mean1_test/'],
-               #'img_idx': 25,
+    'venice': {'dir': ['1x_1sample_venice_simplified_20_100_stratified_subsample_3/test_new/',
+                       '1x_1sample_venice_simplified_20_100_aux_largest_capacity/test_new/',
+                       '1x_1sample_venice_simplified_20_100_stratified_subsample_3/mean1_test/'],
+               'img_idx': 18,
                'img_zoom_bbox': [120, 120+120, 100, 100+80],
-               'gt_dir': '/n/fs/shaderml/datas_venice_100spp_simplified_30_70_automatic_200/test_img',
-               'other_view': ['home/global_opt/proj/apps/out/venice_none_normal_none/teaser00000.png',
-                              'scratch/1x_1sample_venice_100spp_simplified_30_70_automatic_200/test/000001.png',
-                              'scratch/1x_1sample_venice_100spp_simplified_30_70_aux/test/000001.png',
-                              'scratch/1x_1sample_venice_100spp_simplified_30_70_automatic_200/mean1_test/000001.png'],
+               'gt_dir': 'datas_venice_new_extrapolation/test_img',
                'input_time_frag': 0.57,
                'print': 'Venice'
               }
@@ -185,10 +152,6 @@ app_shader_dir_200 = {
     'mandelbrot': {'dir': ['1x_1sample_mandelbrot_full_temporal_automatic_200_correct_alpha/test',
                    '1x_1sample_mandelbrot_full_temporal_correct_alpha_aux/test',
                           '1x_1sample_mandelbrot_tile_automatic_200_repeat/mean1_test'],
-                   #'other_view': ['mandelbrot_full_temporal_gt_gamma_corrected.png',
-                   #               '1x_1sample_mandelbrot_full_temporal_automatic_200_correct_alpha/test_gamma_corrected/00000727.png',
-                   #               '1x_1sample_mandelbrot_full_temporal_correct_alpha_aux/test_gamma_corrected/00000727.png',
-                   #               'mandelbrot_full_temporal_input_gamma_corrected.png'],
                    'other_view': ['home/global_opt/proj/apps/out/mandelbrot_tile_radius_plane_normal_none/video_gt_gamma_corrected/video_gt00119.png',
                        '1x_1sample_mandelbrot_full_temporal_automatic_200_correct_alpha/render_gamma_corrected/000120.png',
                                   '1x_1sample_mandelbrot_full_temporal_correct_alpha_aux/render_gamma_corrected/000120.png',
@@ -214,8 +177,8 @@ app_shader_dir_200 = {
                                   'mandelbulb_full_temporal_input.png'],
                    'print': 'Mandelbulb'
                   },
-    'trippy_simplified': {'dir': ['1x_1sample_trippy_simplified_temporal_corrected_alpha/test',
-                                  '1x_1sample_trippy_simplified_temporal_corrected_alpha_aux/test',
+    'trippy_simplified': {'dir': ['1x_1sample_trippy_simplified_temporal_corrected_alpha/test_new',
+                                  '1x_1sample_trippy_simplified_temporal_corrected_alpha_aux/test_new',
                                   '1x_1sample_trippy_heart_simplified_proxy_dfs_automatic_200/mean1_test'],
                           'other_view': ['/n/fs/shaderml/datas_trippy_temporal/test_img/test_ground2900010.png',
                                          '1x_1sample_trippy_simplified_temporal_corrected_alpha/test/00001127.png',
@@ -225,26 +188,26 @@ app_shader_dir_200 = {
                          }
     },
 'post_processing': {
-    'mandelbulb_blur': {'dir': ['1x_1sample_mandelbulb_defocus_blur_automatic_200/test',
-                                '1x_1sample_mandelbulb_defocus_blur_automatic_200_aux/test'],
-                        'img_idx': 7,
+    'mandelbulb_blur': {'dir': ['1x_1sample_mandelbulb_with_bg_defocus_blur/test',
+                                '1x_1sample_mandelbulb_with_bg_defocus_blur_aux_largest_capacity/test'],
+                        'img_idx': 21,
                         'img_zoom_bbox': [370, 370+80, 370, 370+60],
-                        'gt_dir': '/n/fs/shaderml/datas_mandelbulb_defocus_blur_automatic_200/test_img',
+                        'gt_dir': 'datas_mandelbulb_defocus_blur/test_img',
                         'crop_box': [200, 640, 132, -292],
                         'print': 'Mandelbulb Blur'
                        },
-    'trippy_sharpen': {'dir': ['1x_1sample_trippy_heart_local_laplacian_random_rotation_automatic_200/test',
-                          '1x_1sample_trippy_heart_local_laplacian_random_rotation_automatic_200_aux/test'],
-                       'img_idx': 11,
+    'trippy_sharpen': {'dir': ['1x_1sample_trippy_local_laplacian_stratified_subsample_8/test_new',
+                          '1x_1sample_trippy_local_laplacian_aux_largest_capacity/test_new'],
+                       'img_idx': 30,
                        'img_zoom_bbox': [180, 180+80, 570, 570+60],
-                       'gt_dir': '/n/fs/shaderml/datas_trippy_local_laplacian_automatic_200/test_img',
+                       'gt_dir': 'datas_trippy_new_extrapolation_local_laplacian_subsample_2/test_img',
                        'print': 'Trippy Heart Sharpen'
                       },
-    'trippy_simplified_sharpen': {'dir': ['1x_1sample_trippy_simplified_local_laplacian_rotation_dataset_automatic_200_update_8/test',
-                                     '1x_1sample_trippy_simplified_local_laplacian_rotation_dataset_automatic_200_update_8_aux/test'],
-                                  'img_idx': 11,
+    'trippy_simplified_sharpen': {'dir': ['1x_1sample_trippy_simplified_local_laplacian_stratified_subsample_4/test_new',
+                                     '1x_1sample_trippy_simplified_local_laplacian_aux_largest_capacity/test_new'],
+                                  'img_idx': 30,
                                   'img_zoom_bbox': [310, 310+80, 180, 180+60],
-                                  'gt_dir': '/n/fs/shaderml/datas_trippy_local_laplacian_automatic_200/test_img',
+                                  'gt_dir': 'datas_trippy_new_extrapolation_local_laplacian_subsample_2/test_img',
                                   'print': 'Simplified Trippy Heart Sharpen'
                                  }
     },
@@ -259,6 +222,11 @@ app_names = ['denoising',
              'post_processing',
              'temporal',
              'simulation']
+
+# DOGE, when data is NOT ready for temporal and simulation
+app_names = app_names[:3]
+del app_shader_dir_200['temporal']
+del app_shader_dir_200['simulation']
 
 max_shader_per_fig = 5
 
@@ -332,19 +300,30 @@ def main():
             l2_score = -np.ones((neval, 3))
 
             for i in range(neval):
+                
+                if key == 'denoising' and i == neval - 1:
+                    additional_dir = 'out_inference_time'
+                else:
+                    additional_dir = ''
 
                 dir = app_data[shader_name]['dir'][i]
 
                 if app_name != 'temporal':
-                    perceptual_breakdown_file = os.path.join(dir, 'perceptual_tf_breakdown.txt')
+                    perceptual_breakdown_file = os.path.join(model_parent_dir, additional_dir, dir, 'perceptual_tf_breakdown.txt')
                 else:
-                    perceptual_breakdown_file = os.path.join(dir, 'vgg_breakdown.txt') 
+                    perceptual_breakdown_file = os.path.join(model_parent_dir, additional_dir, dir, 'vgg_breakdown.txt') 
                 
-                perceptual_single_file = os.path.join(dir, 'vgg.txt')
-                l2_single_file = os.path.join(dir, 'all_loss.txt')
+                perceptual_single_file = os.path.join(model_parent_dir, additional_dir, dir, 'vgg.txt')
+                l2_single_file = os.path.join(model_parent_dir, additional_dir, dir, 'all_loss.txt')
 
                 if app_name in ['denoising', 'simplified', 'post_processing', 'temporal']:
-                    perceptual_scores = open(perceptual_breakdown_file).read()
+                    
+                    if os.path.exists(perceptual_breakdown_file):
+                        perceptual_scores = open(perceptual_breakdown_file).read()
+                    else:
+                        assert key in ['denoising', 'simplified'] and i == neval - 1
+                        perceptual_scores = '0,0,0'
+                    
                     perceptual_scores.replace('\n', '')
                     perceptual_scores.replace(' ', '')
                     perceptual_scores = perceptual_scores.split(',')
@@ -368,8 +347,15 @@ def main():
                     raise
 
                 if app_name not in ['simulation']:
-                    l2_breakdown_file = os.path.join(dir, 'score_breakdown.txt')
-                    l2_scores = open(l2_breakdown_file).read()
+                    
+                    l2_breakdown_file = os.path.join(model_parent_dir, additional_dir, dir, 'score_breakdown.txt')
+                    
+                    if os.path.exists(l2_breakdown_file):
+                        l2_scores = open(l2_breakdown_file).read()
+                    else:
+                        assert key in ['denoising', 'simplified'] and i == neval - 1
+                        l2_scores = '0,0,0'
+                        
                     l2_scores.replace('\n', '')
                     l2_scores.replace(' ', '')
                     l2_scores = l2_scores.split(',')
@@ -669,15 +655,21 @@ def main():
 
                         orig_imgs = []
                         for i in range(len(data['dir'])):
-                            if app_name == 'temporal':
-                                orig_imgs.append(skimage.io.imread(os.path.join(data['dir'][i], '%06d27.png' % data['img_idx'])))
+                            
+                            if app_name == 'denoising' and i == len(data['dir']) - 1:
+                                additional_dir = 'out_inference_time'
                             else:
-                                orig_imgs.append(skimage.io.imread(os.path.join(data['dir'][i], '%06d.png' % data['img_idx'])))
+                                additional_dir = ''
+                            
+                            if app_name == 'temporal':
+                                orig_imgs.append(skimage.io.imread(os.path.join(model_parent_dir, additional_dir, data['dir'][i], '%06d27.png' % data['img_idx'])))
+                            else:
+                                orig_imgs.append(skimage.io.imread(os.path.join(model_parent_dir, additional_dir, data['dir'][i], '%06d.png' % data['img_idx'])))
                         if app_name == 'temporal':
-                            gt_img = skimage.io.imread(os.path.join(data['gt_dir'], '29%05d.png' % (data['img_idx']-1)))
+                            gt_img = skimage.io.imread(os.path.join(dataset_parent_dir, data['gt_dir'], '29%05d.png' % (data['img_idx']-1)))
                         else:
-                            gt_files = sorted(os.listdir(data['gt_dir']))
-                            gt_img = skimage.io.imread(os.path.join(data['gt_dir'], gt_files[data['img_idx']-1]))
+                            gt_files = sorted(os.listdir(os.path.join(dataset_parent_dir, data['gt_dir'])))
+                            gt_img = skimage.io.imread(os.path.join(dataset_parent_dir, data['gt_dir'], gt_files[data['img_idx']-1]))
 
                         orig_imgs = [gt_img] + orig_imgs
                     else:
@@ -970,15 +962,21 @@ def main():
 
                         orig_imgs = []
                         for i in range(len(data['dir'])):
-                            if app_name == 'temporal':
-                                orig_imgs.append(os.path.join(data['dir'][i], '%06d27.png' % data['img_idx']))
+                            
+                            if shader_name == 'denoising' and i == len(data['dir']) - 1:
+                                additional_dir = 'out_inference_time'
                             else:
-                                orig_imgs.append(os.path.join(data['dir'][i], '%06d.png' % data['img_idx']))
+                                additional_dir = ''
+                    
+                            if app_name == 'temporal':
+                                orig_imgs.append(os.path.join(model_parent_dir, additional_dir, data['dir'][i], '%06d27.png' % data['img_idx']))
+                            else:
+                                orig_imgs.append(os.path.join(model_parent_dir, additional_dir, data['dir'][i], '%06d.png' % data['img_idx']))
                         if app_name == 'temporal':
-                            gt_img = os.path.join(data['gt_dir'], '29%05d.png' % (data['img_idx']-1))
+                            gt_img = os.path.join(dataset_parent_dir, data['gt_dir'], '29%05d.png' % (data['img_idx']-1))
                         else:
-                            gt_files = sorted(os.listdir(data['gt_dir']))
-                            gt_img = os.path.join(data['gt_dir'], gt_files[data['img_idx']-1])
+                            gt_files = sorted(os.listdir(os.path.join(dataset_parent_dir, data['gt_dir'])))
+                            gt_img = os.path.join(dataset_parent_dir, data['gt_dir'], gt_files[data['img_idx']-1])
 
                         orig_imgs = [gt_img] + orig_imgs
                     else:
@@ -1085,8 +1083,8 @@ def main():
             for i in range(len(all_dirs)):
                 dir = all_dirs[i]
                 if dir is not None:
-                    l2_breakdown_file = os.path.join(dir, 'score_breakdown.txt')
-                    perceptual_breakdown_file = os.path.join(dir, 'perceptual_tf_breakdown.txt')
+                    l2_breakdown_file = os.path.join(model_parent_dir, dir, 'score_breakdown.txt')
+                    perceptual_breakdown_file = os.path.join(model_parent_dir, dir, 'perceptual_tf_breakdown.txt')
 
                     l2_scores = open(l2_breakdown_file).read()
                     l2_scores.replace('\n', '')
