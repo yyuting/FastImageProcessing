@@ -1786,12 +1786,13 @@ def main_network(args):
             for key in deprecated_options:
                 if key in option_str:
                     idx = option_str.index(key)
-                    try:
-                        next_sep = option_str.index(',', idx)
-                    except ValueError:
-                        next_sep = option_str.index(')', idx) - 2
-                        idx -= 2
-                    option_str = option_str.replace(option_str[idx:next_sep+2], '')
+                    if option_str[idx-1] in [',', '(', ' ']:
+                        try:
+                            next_sep = option_str.index(',', idx)
+                        except ValueError:
+                            next_sep = option_str.index(')', idx) - 2
+                            idx -= 2
+                        option_str = option_str.replace(option_str[idx:next_sep+2], '')
             assert option_str == str(option_copy)
             option_copy = copy_option(args)
             if args.overwrite_option_file:
