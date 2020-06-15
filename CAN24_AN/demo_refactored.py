@@ -54,7 +54,7 @@ less_aggresive_ini = False
 conv_padding = "SAME"
 padding_offset = 32
 
-deprecated_options = ['feature_reduction_channel_by_samples', 'is_npy', 'orig_channel', 'nsamples', 'is_bin', 'upsample_scale', 'upsample_single', 'upsample_shrink_feature', 'clip_weights', 'deconv', 'share_weights', 'clip_weights_percentage', 'encourage_sparse_features', 'validate_loss_freq', 'collect_validate_while_training', 'clip_weights_percentage_after_normalize', 'normalize_weights', 'normalize_weights', 'rowwise_L2_normalize', 'Frobenius_normalize', 'bilinear_upsampling', 'full_resolution', 'unet', 'unet_base_channel', 'learn_scale', 'soft_scale', 'scale_ratio', 'use_sigmoid', 'orig_rgb', 'use_weight_map', 'render_camera_pos_velocity', 'gradient_loss', 'normalize_grad', 'grayscale_grad', 'cos_sim', 'gradient_loss_scale', 'gradient_loss_all_pix', 'gradient_loss_canny_weight', 'two_stage_training', 'new_minimizer', 'weight_map_add', 'sigmoid_scaling', 'visualize_scaling', 'visualize_ind', 'test_tiling', 'motion_blur', 'dynamic_training_samples', 'dynamic_training_mode', 'automatic_find_gpu', 'test_rotation', 'abs_normalize', 'feature_reduction_regularization_scale', 'learn_sigma', 'repeat_timing', 'name', 'specified_ind']
+deprecated_options = ['feature_reduction_channel_by_samples', 'is_npy', 'orig_channel', 'nsamples', 'is_bin', 'upsample_scale', 'upsample_single', 'upsample_shrink_feature', 'clip_weights', 'deconv', 'share_weights', 'clip_weights_percentage', 'encourage_sparse_features', 'validate_loss_freq', 'collect_validate_while_training', 'clip_weights_percentage_after_normalize', 'normalize_weights', 'normalize_weights', 'rowwise_L2_normalize', 'Frobenius_normalize', 'bilinear_upsampling', 'full_resolution', 'unet', 'unet_base_channel', 'learn_scale', 'soft_scale', 'scale_ratio', 'use_sigmoid', 'orig_rgb', 'use_weight_map', 'render_camera_pos_velocity', 'gradient_loss', 'normalize_grad', 'grayscale_grad', 'cos_sim', 'gradient_loss_scale', 'gradient_loss_all_pix', 'gradient_loss_canny_weight', 'two_stage_training', 'new_minimizer', 'weight_map_add', 'sigmoid_scaling', 'visualize_scaling', 'visualize_ind', 'test_tiling', 'motion_blur', 'dynamic_training_samples', 'dynamic_training_mode', 'automatic_find_gpu', 'test_rotation', 'abs_normalize', 'feature_reduction_regularization_scale', 'learn_sigma', 'repeat_timing', 'name', 'specified_ind', 'boids_seq_metric']
 
 def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_constant', nsamples=1, shader_name='zigzag', geometry='plane', feature_w=[], color_inds=[], intersection=True, manual_features_only=False, aux_plus_manual_features=False, efficient_trace=False, collect_loop_statistic=False, h_start=0, h_offset=height, w_start=0, w_offset=width, samples=None, fov='regular', camera_pos_velocity=None, t_sigma=1/60.0, first_last_only=False, last_only=False, subsample_loops=-1, last_n=-1, first_n=-1, first_n_no_last=-1, mean_var_only=False, zero_samples=False, render_fix_spatial_sample=False, render_fix_temporal_sample=False, render_zero_spatial_sample=False, spatial_samples=None, temporal_samples=None, every_nth=-1, every_nth_stratified=False, one_hop_parent=False, target_idx=[], use_manual_index=False, manual_index_file='', additional_features=True, ignore_last_n_scale=0, include_noise_feature=False, crop_h=-1, crop_w=-1, no_noise_feature=False, relax_clipping=False, render_sigma=None, same_sample_all_pix=False, stratified_sample_higher_res=False, samples_int=[None], texture_maps=[], partial_trace=1.0, use_lstm=False, lstm_nfeatures_per_group=1, rotate=0, flip=0, use_dataroot=True, automatic_subsample=False, automate_raymarching_def=False, chron_order=False, def_loop_log_last=False, temporal_texture_buffer=False, texture_inds=[], log_only_return_def_raymarching=True, debug=[], SELECT_FEATURE_THRE=200, n_boids=40, log_getitem=True, color_scale=[], parallel_stack=True, compiler_problem_idx=-1, input_feature_pl=[], input_to_shader=[], trace_features=[], input_feature_scale_bias=[], finite_diff=False, feature_normalize_lo_pct=20, get_col_aux_inds=False, specified_ind=None, write_file=True, alt_dir=''):
     # 2x_1sample on margo
@@ -452,7 +452,11 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                 
                 new_features = []
                 for ind in specified_ind_vals:
-                    new_features.append(out_features[ind])
+                    if ind < len(out_features):
+                        new_features.append(out_features[ind])
+                    else:
+                        assert shader_name.startswith('boids')
+                        assert ind < len(out_features) + int(texture_maps.shape[-1])
                 out_features = new_features
                 
                 feature_bias = feature_bias[specified_ind_vals]
@@ -470,6 +474,12 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
                         if isinstance(vec, tf.Tensor):
                             actual_ind = out_features.index(vec)
                             color_inds.append(actual_ind)
+                            
+                if shader_name.startswith('boids'):
+                    # add input texture
+                    for i in range(int(texture_maps.shape[-1])):
+                        color_inds.append(len(out_features) + i)
+                        
                 if alt_dir == '':
                     np.save(os.path.join(name, 'col_aux_inds.npy'), color_inds)
                 else:
@@ -1745,6 +1755,7 @@ def copy_option(args):
     delattr(new_args, 'name')
     delattr(new_args, 'overwrite_option_file')
     delattr(new_args, 'alt_ckpt_base_dir')
+    delattr(new_args, 'boids_seq_metric')
     return new_args
 
 def main_network(args):
@@ -1775,12 +1786,13 @@ def main_network(args):
             for key in deprecated_options:
                 if key in option_str:
                     idx = option_str.index(key)
-                    try:
-                        next_sep = option_str.index(',', idx)
-                    except ValueError:
-                        next_sep = option_str.index(')', idx) - 2
-                        idx -= 2
-                    option_str = option_str.replace(option_str[idx:next_sep+2], '')
+                    if option_str[idx-1] in [',', '(', ' ']:
+                        try:
+                            next_sep = option_str.index(',', idx)
+                        except ValueError:
+                            next_sep = option_str.index(')', idx) - 2
+                            idx -= 2
+                        option_str = option_str.replace(option_str[idx:next_sep+2], '')
             assert option_str == str(option_copy)
             option_copy = copy_option(args)
             if args.overwrite_option_file:
@@ -2302,56 +2314,58 @@ def main_network(args):
             else:
                 #camera_pos = tf.placeholder(dtype, shape=[33, args.batch_size])
                 camera_pos_len = 33
-        if args.optimize_input:
-            assert args.use_dataroot
-            # normalize camera pos and shader time according to training data
-            camera_pos_training_pool = numpy.load(os.path.join(args.dataroot, 'train.npy'))
-            camera_pos_bias = np.expand_dims(-np.min(camera_pos_training_pool, 0), 1)
-            
-            camera_pos_scale_raw = np.max(camera_pos_training_pool, 0) - np.min(camera_pos_training_pool, 0)
-            camera_pos_scale = numpy.ones(camera_pos_scale_raw.shape)
-            camera_pos_scale[camera_pos_scale_raw.nonzero()] = camera_pos_scale_raw[camera_pos_scale_raw.nonzero()]
-            camera_pos_scale = np.expand_dims(camera_pos_scale, 1)
-            
-            shader_time_training_pool = numpy.load(os.path.join(args.dataroot, 'train_time.npy'))
-            shader_time_bias = -numpy.min(shader_time_training_pool)
-            shader_time_scale = np.max(shader_time_training_pool) + shader_time_bias
-            if shader_time_scale == 0:
-                shader_time_scale = 1
-            
-            #camera_pos_var = tf.Variable(np.zeros([camera_pos_len, args.batch_size]), dtype=dtype)
-            if args.feed_dict_optimize_input:
-                camera_pos_var = tf.placeholder(dtype, shape=[camera_pos_len, args.batch_size])
-                shader_time_var = tf.placeholder(dtype, shape=args.batch_size)
+            if args.optimize_input:
+                assert args.use_dataroot
+                # normalize camera pos and shader time according to training data
+                camera_pos_training_pool = numpy.load(os.path.join(args.dataroot, 'train.npy'))
+                camera_pos_bias = np.expand_dims(-np.min(camera_pos_training_pool, 0), 1)
+
+                camera_pos_scale_raw = np.max(camera_pos_training_pool, 0) - np.min(camera_pos_training_pool, 0)
+                camera_pos_scale = numpy.ones(camera_pos_scale_raw.shape)
+                camera_pos_scale[camera_pos_scale_raw.nonzero()] = camera_pos_scale_raw[camera_pos_scale_raw.nonzero()]
+                camera_pos_scale = np.expand_dims(camera_pos_scale, 1)
+
+                shader_time_training_pool = numpy.load(os.path.join(args.dataroot, 'train_time.npy'))
+                shader_time_bias = -numpy.min(shader_time_training_pool)
+                shader_time_scale = np.max(shader_time_training_pool) + shader_time_bias
+                if shader_time_scale == 0:
+                    shader_time_scale = 1
+
+                #camera_pos_var = tf.Variable(np.zeros([camera_pos_len, args.batch_size]), dtype=dtype)
+                if args.feed_dict_optimize_input:
+                    camera_pos_var = tf.placeholder(dtype, shape=[camera_pos_len, args.batch_size])
+                    shader_time_var = tf.placeholder(dtype, shape=args.batch_size)
+                else:
+                    camera_pos_var = tf.Variable((camera_pos_training_pool[:args.batch_size].transpose() + camera_pos_bias) / camera_pos_scale, dtype=dtype)
+                    shader_time_var = tf.Variable(np.zeros(args.batch_size), dtype=dtype)
+
+
+                if args.finite_diff:
+                    finite_h = 1e-2
+                    # for computational efficientcy we only add 7 more examples, finite diff will be computed as
+                    # (f(x + h) - f(x)) / h
+
+                    shader_time_finite = tf.concat((tf.tile(shader_time_var, [7]), shader_time_var + finite_h), 0)
+
+                    camera_stacks = [camera_pos_var]                            
+                    current_finite = np.zeros(6)    
+                    for i in range(6):
+                        current_finite[:] = 0
+                        current_finite[i] = finite_h
+                        camera_stacks.append(camera_pos_var + np.expand_dims(current_finite, 1))
+                    camera_stacks.append(camera_pos_var)
+
+                    camera_pos_finite = tf.concat(camera_stacks, 1)
+                else:
+                    shader_time_finite = shader_time_var
+                    camera_pos_finite = camera_pos_var
+
+                camera_pos = camera_pos_finite * camera_pos_scale - camera_pos_bias
+                shader_time = shader_time_finite * shader_time_scale - shader_time_bias
             else:
-                camera_pos_var = tf.Variable((camera_pos_training_pool[:args.batch_size].transpose() + camera_pos_bias) / camera_pos_scale, dtype=dtype)
-                shader_time_var = tf.Variable(np.zeros(args.batch_size), dtype=dtype)
-                
-                
-            if args.finite_diff:
-                finite_h = 1e-2
-                # for computational efficientcy we only add 7 more examples, finite diff will be computed as
-                # (f(x + h) - f(x)) / h
-                
-                shader_time_finite = tf.concat((tf.tile(shader_time_var, [7]), shader_time_var + finite_h), 0)
-                
-                camera_stacks = [camera_pos_var]                            
-                current_finite = np.zeros(6)    
-                for i in range(6):
-                    current_finite[:] = 0
-                    current_finite[i] = finite_h
-                    camera_stacks.append(camera_pos_var + np.expand_dims(current_finite, 1))
-                camera_stacks.append(camera_pos_var)
-                
-                camera_pos_finite = tf.concat(camera_stacks, 1)
-            else:
-                shader_time_finite = shader_time_var
-                camera_pos_finite = camera_pos_var
-                
-            camera_pos = camera_pos_finite * camera_pos_scale - camera_pos_bias
-            shader_time = shader_time_finite * shader_time_scale - shader_time_bias
+                camera_pos = tf.placeholder(dtype, shape=[camera_pos_len, args.batch_size])
+                shader_time = tf.placeholder(dtype, shape=args.batch_size)
         else:
-            camera_pos = tf.placeholder(dtype, shape=[camera_pos_len, args.batch_size])
             shader_time = tf.placeholder(dtype, shape=args.batch_size)
     if args.additional_input:
         additional_input_pl = tf.placeholder(dtype, shape=[None, output_pl_h, output_pl_w, 1])
@@ -2709,8 +2723,22 @@ def main_network(args):
                 reduced_dim_feature = input_to_network
                 
                 if args.add_initial_layers:
+                    
                     for nlayer in range(3):
-                        input_to_network = slim.conv2d(input_to_network, actual_initial_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(allow_map_to_less=True), scope='initial_'+str(nlayer), weights_regularizer=regularizer, padding=conv_padding)            
+                        if ndims == 2:
+                            input_to_network = slim.conv2d(input_to_network, actual_initial_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(allow_map_to_less=True), scope='initial_'+str(nlayer), weights_regularizer=regularizer, padding=conv_padding)      
+                        else:
+                            
+                            #w_shape = [1, args.input_nc, actual_initial_layer_channels]
+                            #conv = tf.nn.conv1d
+                            #strides = 1
+                            #weights = tf.get_variable('w0', w_shape, initializer=tf.contrib.layers.xavier_initializer() if not args.identity_initialize else identity_initializer(color_inds, ndims=ndims), regularizer=regularizer)
+
+                            #weights_to_input = weights
+
+                            #input_to_network = conv(input_to_network, weights_to_input, strides, "SAME")
+                            
+                            input_to_network = slim.conv1d(input_to_network, actual_initial_layer_channels, 1, rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(allow_map_to_less=True, ndims=1), scope='initial_'+str(nlayer), weights_regularizer=regularizer, padding=conv_padding)      
 
                 if args.geometry.startswith('boids'):
                     # 1D case
@@ -4590,7 +4618,8 @@ def main_network(args):
                         numpy.save(os.path.join(debug_dir, 'all_error.npy'), all_error)
                         #loss_prob = np.sum(np.mean(all_l2, 1) * sample_p)
                         #open("%s/all_loss.txt"%debug_dir, 'w').write("%f, %f"%(np.mean(all_l2), loss_prob))
-                        #open("%s/all_time.txt"%debug_dir, 'w').write("%f"%(np.median(all_time)))
+                        open("%s/all_loss.txt"%debug_dir, 'w').write("%f"%(np.mean(all_l2)))
+                        open("%s/all_time.txt"%debug_dir, 'w').write("%f"%(np.median(all_time)))
                         print("all times saved")
 
                 else:

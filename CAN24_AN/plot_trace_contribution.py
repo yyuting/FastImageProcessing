@@ -20,6 +20,9 @@ markeredgewidth = 6
 
 shader_names = ['mandelbulb', 'mandelbrot', 'primitives', 'trippy']
 
+use_test_new = True
+use_test_new_shaders = ['primitives']
+
 slicing_datas = {
     'mandelbrot': {
         'baseline': [
@@ -133,6 +136,11 @@ def get_info(dirname, is_baseline=False, base_dir=None, get_runtime=False):
     full_dirname = os.path.join('/mnt/shadermlnfs1/shadermlvm/playground/models', dirname)
     inference_time_dirname = os.path.join('/mnt/shadermlnfs1/shadermlvm/playground/models/out_inference_time', dirname)
     
+    test_dir = 'test'
+    if use_test_new:
+        for key in use_test_new_shaders:
+            if key in dirname:
+                test_dir = 'test_new'
     
     if is_baseline:
         orig_base_dir = base_dir
@@ -144,10 +152,10 @@ def get_info(dirname, is_baseline=False, base_dir=None, get_runtime=False):
         specified_ind = np.load(os.path.join(full_dirname, 'specified_ind.npy'))
         trace_len = specified_ind.shape[0]
         
-    perceptual_file = os.path.join(full_dirname, 'test/perceptual_tf.txt')
+    perceptual_file = os.path.join(full_dirname, '%s/perceptual_tf.txt' % test_dir)
     perceptual_score = float(open(perceptual_file).read())
     
-    l2_file = os.path.join(full_dirname, 'test/score.txt')
+    l2_file = os.path.join(full_dirname, '%s/score.txt' % test_dir)
     l2_score = float(open(l2_file).read())
 
     ans = {
@@ -173,10 +181,10 @@ def get_info(dirname, is_baseline=False, base_dir=None, get_runtime=False):
         all_trace_len = trace_contrib.shape[0]
         ans['all_trace'] = all_trace_len
         
-        perceptual_file = os.path.join(base_dir, 'test/perceptual_tf.txt')
+        perceptual_file = os.path.join(base_dir, '%s/perceptual_tf.txt' % test_dir)
         perceptual_score = float(open(perceptual_file).read())
 
-        l2_file = os.path.join(base_dir, 'test/score.txt')
+        l2_file = os.path.join(base_dir, '%s/score.txt' % test_dir)
         l2_score = float(open(l2_file).read())
         
         ans['all_perceptual'] = perceptual_score
