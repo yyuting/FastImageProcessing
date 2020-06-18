@@ -29,8 +29,14 @@ teaser_shader = 'venice'
 model_parent_dir = '/mnt/shadermlnfs1/shadermlvm/playground/models/'
 dataset_parent_dir = '/mnt/shadermlnfs1/shadermlvm/playground/datasets/'
 
+tex_prefix = 'new_submission/'
+
 score_pl = 0.0
 img_pl = np.zeros((640, 960, 3))
+allow_missing_MSAA = False
+allow_missing_temporal = True
+allow_missing_simulation = True
+use_gamma_corrected = False
 
 app_shader_dir_200 = {
 'denoising': {
@@ -38,63 +44,62 @@ app_shader_dir_200 = {
                        '1x_1sample_bricks_with_bg_aux_largest_capacity/test/',
                        '1x_1sample_bricks_with_bg_all/mean1_test/'],
                'img_idx': 9,
-               'img_zoom_bbox': [240, 320, -190, -130],
+               'img_zoom_bbox': [400, 480, -140, -80],
                'gt_dir': 'datas_bricks_normal_texture/test_img',
                'msaa_sample': 1,
                'print': 'Bricks'
               },
     'mandelbrot': {'dir': ['1x_1sample_mandelbrot_with_bg_stratified_subsample_2/test/',
                            '1x_1sample_mandelbrot_with_bg_aux_largest_capacity/test/',
-                           '1x_1sample_mandelbrot_with_bg_all/mean3_test/'],
-                   'img_idx': 9,
-                   'img_zoom_bbox': [550, 550+80, 500, 500+60],
+                           '1x_1sample_mandelbrot_with_bg_all/mean5_test/'],
+                   'img_idx': 30,
+                   'img_zoom_bbox': [250, 250+80, 570, 570+60],
                    'gt_dir': 'datas_mandelbrot/test_img',
-                   'msaa_sample': 3,
+                   'msaa_sample': 5,
                    'print': 'Mandelbrot'
                   },
     'mandelbulb': {'dir': ['1x_1sample_mandelbulb_with_bg_all/test/',
                            '1x_1sample_mandelbulb_with_bg_aux_largest_capacity/test/',
-                           '1x_1sample_mandelbulb_with_bg_all/mean3_test/'],
+                           '1x_1sample_mandelbulb_with_bg_all/mean2_test/'],
                    'img_idx': 20,
-                   'img_zoom_bbox': [370, 370+80, 370, 370+60],
-                   'crop_box': [200, 640, 70, -230],
+                   'img_zoom_bbox': [250, 250+80, 325, 325+60],
                    'gt_dir': 'datas_mandelbulb/test_img',
-                   'msaa_sample': 3,
+                   'msaa_sample': 2,
                    'print': 'Mandelbulb'
                   },
     'primitives': {'dir': ['1x_1sample_primitives_all/test_new/',
                            '1x_1sample_primitives_aux_largest_capacity/test_new/',
                            '1x_1sample_primitives_all/mean1_test/'],
                    'img_idx': 15,
-                   'img_zoom_bbox': [270, 270+80, 370, 370+60],
+                   'img_zoom_bbox': [420, 420+80, 600, 600+60],
                    'gt_dir': 'datas_primitives_correct_test_range/test_img',
                    'msaa_sample': 1,
-                   'crop_box': [80, -180, 115, -275],
+                   #'crop_box': [80, -180, 115, -275],
                    'print': 'Gear'
                   },
     'trippy': {'dir': ['1x_1sample_trippy_stratified_subsample_8/test_new/',
                '1x_1sample_trippy_aux_largest_capacity/test_new/',
-               '1x_1sample_trippy_subsample_2/mean4_test/'],
+               '1x_1sample_trippy_subsample_2/mean9_test/'],
                'img_idx': 30,
                'img_zoom_bbox': [550, 550+80, 65, 65+60],
                'gt_dir': 'datas_trippy_new_extrapolation_subsample_2/test_img',
-               'msaa_sample': 4,
+               'msaa_sample': 9,
                'print': 'Trippy Heart'
               },
     'oceanic': {'dir': ['1x_1sample_oceanic_all/test/',
                 '1x_1sample_oceanic_aux_largest_capacity/test/',
                 '1x_1sample_oceanic_all/mean1_test/'],
                 'img_idx': 11,
-                'img_zoom_bbox': [280, 280+80, 750, 750+60],
+                'img_zoom_bbox': [475, 475+120, -120, -30],
                 'gt_dir': 'datas_oceanic/test_img',
                 'msaa_sample': 1,
                 'print': 'Oceanic'
                },
     'venice': {'dir': ['1x_1sample_venice_stratified_subsample_3/test_new/',
                '1x_1sample_venice_aux_largest_capacity/test_new/',
-               '1x_1sample_venice_stratified_subsample_3/mean1_test/'],
-               'img_idx': 27,
-               'img_zoom_bbox': [150, 150+80, 150, 150+60],
+               '1x_1sample_venice_all/mean1_test/'],
+               'img_idx': 3,
+               'img_zoom_bbox': [170, 170+80, 40, 40+60],
                'gt_dir': 'datas_venice_new_extrapolation/test_img',
                'msaa_sample': 1,
                'print': 'Venice'
@@ -103,14 +108,14 @@ app_shader_dir_200 = {
 'simplified': {
     'bricks': {'dir': ['1x_1sample_bricks_simplified_with_bg_all/test/',
                '1x_1sample_bricks_simplified_with_bg_aux_largest_capacity/test/',
-               '1x_1sample_bricks_simplified_proxy/mean1_test'],
+               '1x_1sample_bricks_simplified_with_bg_all/mean1_test'],
                'img_idx': 15,
                'gt_dir': 'datas_bricks_normal_texture/test_img',
                'print': 'Bricks'
               },
     'mandelbrot': {'dir': ['1x_1sample_mandelbrot_simplified_with_bg_all/test/',
                    '1x_1sample_mandelbrot_simplified_with_bg_aux_largest_capacity/test/',
-                   '1x_1sample_mandelbrot_simplified_with_bg_all/mean1_test/'],
+                   '1x_1sample_mandelbrot_simplified_all/mean1_test/'],
                    'img_idx': 30,
                    'gt_dir': 'datas_mandelbrot/test_img',
                    'print': 'Mandelbrot'
@@ -131,11 +136,11 @@ app_shader_dir_200 = {
               },
     'venice': {'dir': ['1x_1sample_venice_simplified_20_100_stratified_subsample_3/test_new/',
                        '1x_1sample_venice_simplified_20_100_aux_largest_capacity/test_new/',
-                       '1x_1sample_venice_simplified_20_100_stratified_subsample_3/mean1_test/'],
+                       '1x_1sample_venice_simplified_20_100_all/mean1_test/'],
                'img_idx': 18,
-               'img_zoom_bbox': [120, 120+120, 100, 100+80],
+               'img_zoom_bbox': [160, 160+120, 150, 150+80],
                'gt_dir': 'datas_venice_new_extrapolation/test_img',
-               'input_time_frag': 0.57,
+               'input_time_frag': 0.61,
                'print': 'Venice'
               }
     },
@@ -191,22 +196,22 @@ app_shader_dir_200 = {
     'mandelbulb_blur': {'dir': ['1x_1sample_mandelbulb_with_bg_defocus_blur/test',
                                 '1x_1sample_mandelbulb_with_bg_defocus_blur_aux_largest_capacity/test'],
                         'img_idx': 21,
-                        'img_zoom_bbox': [370, 370+80, 370, 370+60],
+                        'img_zoom_bbox': [320, 320+80, 450, 450+60],
                         'gt_dir': 'datas_mandelbulb_defocus_blur/test_img',
-                        'crop_box': [200, 640, 132, -292],
+                        'crop_box': [76, 524, 207, -207],
                         'print': 'Mandelbulb Blur'
                        },
     'trippy_sharpen': {'dir': ['1x_1sample_trippy_local_laplacian_stratified_subsample_8/test_new',
                           '1x_1sample_trippy_local_laplacian_aux_largest_capacity/test_new'],
                        'img_idx': 30,
-                       'img_zoom_bbox': [180, 180+80, 570, 570+60],
+                       'img_zoom_bbox': [240, 240+80, 705, 705+60],
                        'gt_dir': 'datas_trippy_new_extrapolation_local_laplacian_subsample_2/test_img',
                        'print': 'Trippy Heart Sharpen'
                       },
     'trippy_simplified_sharpen': {'dir': ['1x_1sample_trippy_simplified_local_laplacian_stratified_subsample_4/test_new',
                                      '1x_1sample_trippy_simplified_local_laplacian_aux_largest_capacity/test_new'],
                                   'img_idx': 30,
-                                  'img_zoom_bbox': [310, 310+80, 180, 180+60],
+                                  'img_zoom_bbox': [440, 440+80, 550, 550+60],
                                   'gt_dir': 'datas_trippy_new_extrapolation_local_laplacian_subsample_2/test_img',
                                   'print': 'Simplified Trippy Heart Sharpen'
                                  }
@@ -301,7 +306,7 @@ def main():
 
             for i in range(neval):
                 
-                if key == 'denoising' and i == neval - 1:
+                if app_name in ['denoising', 'simplified'] and i == neval - 1:
                     additional_dir = 'out_inference_time'
                 else:
                     additional_dir = ''
@@ -321,8 +326,8 @@ def main():
                     if os.path.exists(perceptual_breakdown_file):
                         perceptual_scores = open(perceptual_breakdown_file).read()
                     else:
-                        assert key in ['denoising', 'simplified'] and i == neval - 1
-                        perceptual_scores = '0,0,0'
+                        assert allow_missing_MSAA and app_name in ['denoising', 'simplified'] and i == neval - 1, perceptual_breakdown_file
+                        perceptual_scores = '1,1,1'
                     
                     perceptual_scores.replace('\n', '')
                     perceptual_scores.replace(' ', '')
@@ -353,8 +358,8 @@ def main():
                     if os.path.exists(l2_breakdown_file):
                         l2_scores = open(l2_breakdown_file).read()
                     else:
-                        assert key in ['denoising', 'simplified'] and i == neval - 1
-                        l2_scores = '0,0,0'
+                        assert allow_missing_MSAA and app_name in ['denoising', 'simplified'] and i == neval - 1
+                        l2_scores = '1,1,1'
                         
                     l2_scores.replace('\n', '')
                     l2_scores.replace(' ', '')
@@ -455,6 +460,12 @@ def main():
         simpliifed_shader_idx = [9, 10, 11, 12, 13, 23]
         full_temporal_idx = [15, 17]
         simplified_temporal_idx = [16, 18, 19]
+        
+        if allow_missing_temporal:
+            full_shader_idx = [0, 1, 2, 3, 4, 5, 6, 14, 15]
+            simpliifed_shader_idx = [8, 9, 10, 11, 12, 16]
+            full_temporal_idx = []
+            simplified_temporal_idx = []
 
         ax = plt.subplot(111)
         #ax.set_aspect(1.0)
@@ -639,12 +650,13 @@ def main():
 
                 data = app_data[shader_name]
 
-
+                if shader_name == 'oceanic':
+                    print('here')
 
                 if 'img_idx' in data.keys() or 'other_view' in data.keys():
 
                     if 'img_idx' in data.keys():
-                        if shader_name == 'mandelbrot':
+                        if shader_name == 'mandelbrot' and use_gamma_corrected:
                             for i in range(len(data['dir'])):
                                 if data['dir'][i].endswith('/'):
                                     data['dir'][i] = data['dir'][i][:-1]
@@ -656,15 +668,23 @@ def main():
                         orig_imgs = []
                         for i in range(len(data['dir'])):
                             
-                            if app_name == 'denoising' and i == len(data['dir']) - 1:
+                            if app_name in ['denoising', 'simplified'] and i == len(data['dir']) - 1:
                                 additional_dir = 'out_inference_time'
                             else:
                                 additional_dir = ''
-                            
+                                
                             if app_name == 'temporal':
-                                orig_imgs.append(skimage.io.imread(os.path.join(model_parent_dir, additional_dir, data['dir'][i], '%06d27.png' % data['img_idx'])))
+                                orig_img_name = os.path.join(model_parent_dir, additional_dir, data['dir'][i], '%06d27.png' % data['img_idx'])
                             else:
-                                orig_imgs.append(skimage.io.imread(os.path.join(model_parent_dir, additional_dir, data['dir'][i], '%06d.png' % data['img_idx'])))
+                                orig_img_name = os.path.join(model_parent_dir, additional_dir, data['dir'][i], '%06d.png' % data['img_idx'])
+                                
+                            if os.path.exists(orig_img_name):
+                                orig_imgs.append(skimage.io.imread(orig_img_name))
+                            else:
+                                assert allow_missing_MSAA and app_name in ['denoising', 'simplified'] and i == len(data['dir']) - 1, orig_img_name
+                                orig_imgs.append(np.copy(img_pl))
+
+                        
                         if app_name == 'temporal':
                             gt_img = skimage.io.imread(os.path.join(dataset_parent_dir, data['gt_dir'], '29%05d.png' % (data['img_idx']-1)))
                         else:
@@ -769,16 +789,16 @@ def main():
 
                     if app_name == 'denoising':
                         str += """
-    %s{\%s}{%s_%s}{0\%%}{%d\%%}{100\%%}{%d\,SPP, %d\%%}
-    """ % (macro, print_name, app_name, shader_name, int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100), data['msaa_sample'], int(data['perceptual'][2, 2] / data['perceptual'][1, 2] * 100))
+    %s{\%s}{%s%s_%s}{0\%%}{%d\%%}{100\%%}{%d\,SPP, %d\%%}
+    """ % (macro, print_name, tex_prefix, app_name, shader_name, int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100), data['msaa_sample'], int(data['perceptual'][2, 2] / data['perceptual'][1, 2] * 100))
                     elif app_name == 'post_processing':
                         str += """
-    %s{\%s: 0\%%}{%s_%s}{100\%%}{%d\%%}
-    """ % (macro, print_name, app_name, shader_name, int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100))
+    %s{\%s: 0\%%}{%s%s_%s}{100\%%}{%d\%%}
+    """ % (macro, print_name, tex_prefix, app_name, shader_name, int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100))
                     else:
                         str += """
-    %s{\%s: 0\%%}{%s_%s}{%d\%%}{100\%%}{%d\%%}
-    """ % (macro, print_name, app_name, shader_name, int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100), int(data['perceptual'][2, 2] / data['perceptual'][1, 2] * 100))
+    %s{\%s: 0\%%}{%s%s_%s}{%d\%%}{100\%%}{%d\%%}
+    """ % (macro, print_name, tex_prefix, app_name, shader_name, int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100), int(data['perceptual'][2, 2] / data['perceptual'][1, 2] * 100))
 
             if not fig_start:
                 str += """
@@ -791,6 +811,9 @@ def main():
     
     if 'teaser' in mode or mode == 'all':
         # generate teaser tex
+        
+        crop_edge_col = [12, 144, 36]
+        bbox_edge_w = 3
 
         app_name = teaser_app
         shader_name = teaser_shader
@@ -802,9 +825,30 @@ def main():
         img_w = 630
         zoom_w = 320
 
+        #orig_imgs = []
+        #for i in range(len(data['other_view'])):
+        #    orig_imgs.append(skimage.io.imread(data['other_view'][i]))
+            
         orig_imgs = []
-        for i in range(len(data['other_view'])):
-            orig_imgs.append(skimage.io.imread(data['other_view'][i]))
+        for i in range(len(data['dir'])):
+
+            if app_name in ['denoising', 'simplified'] and i == len(data['dir']) - 1:
+                additional_dir = 'out_inference_time'
+            else:
+                additional_dir = ''
+
+            orig_img_name = os.path.join(model_parent_dir, additional_dir, data['dir'][i], '%06d.png' % data['img_idx'])
+
+            if os.path.exists(orig_img_name):
+                orig_imgs.append(skimage.io.imread(orig_img_name))
+            else:
+                assert allow_missing_MSAA and app_name in ['denoising', 'simplified'] and i == len(data['dir']) - 1, orig_img_name
+                orig_imgs.append(np.copy(img_pl))
+
+        gt_files = sorted(os.listdir(os.path.join(dataset_parent_dir, data['gt_dir'])))
+        gt_img = skimage.io.imread(os.path.join(dataset_parent_dir, data['gt_dir'], gt_files[data['img_idx']-1]))
+
+        orig_imgs = [gt_img] + orig_imgs
 
         crop_size = (orig_img_w - img_w) // 2
 
@@ -853,14 +897,14 @@ def main():
 
     \\begin{teaserfigure}
     \\vspace{1ex}    
-    \ResultsFigTeaser{\%s: 100\%% time, 0\%% error}{teaser_%s_%s}{%.2f\%% time, %d\%% error}{100\%% error}{%d\%% error}
+    \ResultsFigTeaser{\%s: 100\%% time, 0\%% error}{%steaser_%s_%s}{%.2f\%% time, %d\%% error}{100\%% error}{%d\%% error}
     \\vspace{-1ex}
     \caption{pl}
     \\vspace{2ex}
     \label{fig:teaser}
     \end{teaserfigure}
 
-    """ % (shader_name, app_name, shader_name, data['input_time_frag'], int(data['perceptual'][2, 2] / data['perceptual'][1, 2] * 100), int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100))
+    """ % (shader_name, tex_prefix, app_name, shader_name, data['input_time_frag'], int(data['perceptual'][2, 2] / data['perceptual'][1, 2] * 100), int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100))
 
 
         open('result_figs/teaser.tex', 'w').write(str)
