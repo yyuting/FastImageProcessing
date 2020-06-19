@@ -26,7 +26,8 @@ def main():
             pass
         
         if file.startswith('model') or file.startswith('checkpoint'):
-            can_copy = False
+            if 'boids' not in dirname:
+                can_copy = False
             
         if file == '__pycache__':
             can_copy = False
