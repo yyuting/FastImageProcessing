@@ -140,7 +140,7 @@ app_shader_dir_200 = {
                'img_idx': 18,
                'img_zoom_bbox': [160, 160+120, 150, 150+80],
                'gt_dir': 'datas_venice_new_extrapolation/test_img',
-               'input_time_frag': 0.61,
+               'input_time_frag': 0.72,
                'print': 'Venice'
               }
     },
@@ -234,6 +234,18 @@ del app_shader_dir_200['temporal']
 del app_shader_dir_200['simulation']
 
 max_shader_per_fig = 5
+
+def round_msaa(current_ratio):
+    # keep 2 significant digits
+    if current_ratio >= 100:
+        ans = '%d' % (round(current_ratio / 10) * 10)
+    elif current_ratio >= 10:
+        ans = '%d' % round(current_ratio)
+    elif current_ratio >= 1:
+        ans = '%.1f' % current_ratio
+    else:
+        ans = '%.2f' % current_ratio
+    return ans
 
 def main():
     if len(sys.argv) > 1:
@@ -522,6 +534,8 @@ def main():
         # table
 
         str = ""
+        
+        str_short = ""
 
         for k in range(len(app_names)):
 
@@ -541,6 +555,16 @@ def main():
 
         \multirow{2}{*}{Shader} &  & \multicolumn{2}{c}{Perceptual} & \multicolumn{2}{c}{L2 Error} \\\\ \cline{3-6} 
         & Distances: & Similar & Different & Similar & Different \\\\ \\thickhline
+    """
+            
+            str_short += """
+    \\vspace{-1ex}
+    \setlength{\\tabcolsep}{4.0pt}
+    \\begin{table}[]
+    \\begin{tabular}{c|ccc}
+    \\hline
+
+        Shader & Distances: & Perceptual & L2 Error \\\\ \\thickhline
     """
 
             #for shader_name in sorted(app_shader_dir_200[app_name].keys()):
@@ -564,6 +588,7 @@ def main():
                 count = 0
 
                 data_strs = [None] * 4 * len(row_data_rel)
+                avg_strs = [None] * 2 * len(row_data_rel)
 
                 for row in range(len(row_data_rel)):
                     for col in range(4):
@@ -579,6 +604,10 @@ def main():
 
                         if row == 0:
                             data_strs[count] = '%.1e' % data[field][1, idx]
+                        elif row == 2:
+                            # MSAA
+                            current_ratio = data[field][data_row, idx] / data[field][1, idx]
+                            data_strs[count] = round_msaa(current_ratio)
                         else:
                             data_strs[count] = '%02d' % (data[field][data_row, idx] / data[field][1, idx] * 100)
 
@@ -586,6 +615,32 @@ def main():
                             data_strs[count] = '\\textbf{' + data_strs[count] + '}'
 
                         count += 1
+                       
+                count = 0
+                for row in range(len(row_data_rel)):
+                    for col in range(2):
+                        data_row = row_data_rel[row]
+                        idx = 2
+                        if col < 1:
+                            field = 'perceptual'
+                            argmin_idx = argmin_perceptual[idx]
+                        else:
+                            field = 'l2'
+                            argmin_idx = argmin_l2[idx]
+
+                        if row == 0:
+                            avg_strs[count] = '%.1e' % data[field][1, idx]
+                        elif row == 2:
+                            # MSAA
+                            current_ratio = data[field][data_row, idx] / data[field][1, idx]
+                            avg_strs[count] = round_msaa(current_ratio)
+                        else:
+                            avg_strs[count] = '%02d' % (data[field][data_row, idx] / data[field][1, idx] * 100)
+
+                        if data_row == argmin_idx:
+                            avg_strs[count] = '\\textbf{' + avg_strs[count] + '}'
+
+                        count += 1  
 
                 print_name = shader_name
                 if print_name not in hue_shaders.keys():
@@ -598,11 +653,21 @@ def main():
                     str += """
         \multicolumn{1}{c|}{\multirow{3}{*}{\\begin{tabular}[c]{@{}c@{}}\\%s \end{tabular}}} & RGBx & %s & %s & %s & %s \\\\ \cline{2-6} 
         \multicolumn{1}{c|}{} & Ours & %s\%% & %s\%% & %s\%% & %s\%% \\\\ \cline{2-6}
-        \multicolumn{1}{c|}{} & MSAA & %s\%% & %s\%% & %s\%% & %s\%% \\\\ \\thickhline""" % ((print_name, ) + tuple(data_strs))
+        \multicolumn{1}{c|}{} & MSAA & %sx & %sx & %sx & %sx \\\\ \\thickhline""" % ((print_name, ) + tuple(data_strs))
+                    
+                    str_short += """
+        \multicolumn{1}{c|}{\multirow{3}{*}{\\begin{tabular}[c]{@{}c@{}}\\%s \end{tabular}}} & RGBx & %s & %s \\\\ \cline{2-4} 
+        \multicolumn{1}{c|}{} & Ours & %s\%% & %s\%% \\\\ \cline{2-4}
+        \multicolumn{1}{c|}{} & Supersample & %sx & %sx \\\\ \\thickhline""" % ((print_name, ) + tuple(avg_strs))
+                    
                 else:
                     str += """
     \multicolumn{1}{c|}{\multirow{2}{*}{\\begin{tabular}[c]{@{}c@{}}\\%s \end{tabular}}} & RGBx & %s & %s & %s & %s \\\\ \cline{2-6} 
         \multicolumn{1}{c|}{} & Ours & %s\%% & %s\%% & %s\%% & %s\%% \\\\ \\thickhline""" % ((print_name, ) + tuple(data_strs))
+                    
+                    str_short += """
+    \multicolumn{1}{c|}{\multirow{2}{*}{\\begin{tabular}[c]{@{}c@{}}\\%s \end{tabular}}} & RGBx & %s & %s \\\\ \cline{2-4} 
+        \multicolumn{1}{c|}{} & Ours & %s\%% & %s\%% \\\\ \\thickhline""" % ((print_name, ) + tuple(avg_strs))
 
             
             print('avg ratio for', app_name)
@@ -614,8 +679,15 @@ def main():
     \caption{%s}
     \end{table}
     """ % app_name.replace('_', '\\ ')
+            
+            str_short = str_short[:-11] + '\hline' + """
+    \end{tabular}
+    \caption{%s}
+    \end{table}
+    """ % app_name.replace('_', '\\ ')
 
         open('result_figs/supplemental.tex', 'w').write(str)
+        open('result_figs/short_table.tex', 'w').write(str_short)
     
     
     if 'fig' in mode or mode == 'all':
@@ -786,19 +858,24 @@ def main():
                                 print_name = name + '\\ simplified'
                                 break
                     print_name = print_name.replace('_', '\\ ')
+                    
+                    if app_name in ['denoising', 'simplified']:
+                        # MSAA
+                        current_ratio = data['perceptual'][2, 2] / data['perceptual'][1, 2]
+                        msaa_str = round_msaa(current_ratio)
 
                     if app_name == 'denoising':
                         str += """
-    %s{\%s}{%s%s_%s}{0\%%}{%d\%%}{100\%%}{%d\,SPP, %d\%%}
-    """ % (macro, print_name, tex_prefix, app_name, shader_name, int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100), data['msaa_sample'], int(data['perceptual'][2, 2] / data['perceptual'][1, 2] * 100))
+    %s{\%s}{%s%s_%s}{0\%%}{%d\%%}{100\%% (baseline)}{%d\,SPP, %sx}
+    """ % (macro, print_name, tex_prefix, app_name, shader_name, int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100), data['msaa_sample'], msaa_str)
                     elif app_name == 'post_processing':
                         str += """
-    %s{\%s: 0\%%}{%s%s_%s}{100\%%}{%d\%%}
+    %s{\%s: 0\%%}{%s%s_%s}{100\%% (baseline)}{%d\%%}
     """ % (macro, print_name, tex_prefix, app_name, shader_name, int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100))
                     else:
                         str += """
-    %s{\%s: 0\%%}{%s%s_%s}{%d\%%}{100\%%}{%d\%%}
-    """ % (macro, print_name, tex_prefix, app_name, shader_name, int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100), int(data['perceptual'][2, 2] / data['perceptual'][1, 2] * 100))
+    %s{\%s: 0\%%}{%s%s_%s}{%d\%%}{100\%% (baseline)}{%sx}
+    """ % (macro, print_name, tex_prefix, app_name, shader_name, int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100), msaa_str)
 
             if not fig_start:
                 str += """
@@ -893,18 +970,31 @@ def main():
 
             skimage.io.imsave(os.path.join('result_figs', 'teaser_%s_%s_%s_box.png' % (app_name, shader_name, prefix)), img)
 
+        if app_name in ['denoising', 'simplified']:
+            # MSAA
+            current_ratio = data['perceptual'][2, 2] / data['perceptual'][1, 2]
+            # keep 2 significant digits
+            if current_ratio >= 100:
+                msaa_str = '%d' % (round(current_ratio / 10) * 10)
+            elif current_ratio >= 10:
+                msaa_str = '%d' % round(current_ratio)
+            elif current_ratio >= 1:
+                msaa_str = '%.1f' % current_ratio
+            else:
+                msaa_str = '%.2f' % current_ratio
+        
         str = """
 
     \\begin{teaserfigure}
     \\vspace{1ex}    
-    \ResultsFigTeaser{\%s: 100\%% time, 0\%% error}{%steaser_%s_%s}{%.2f\%% time, %d\%% error}{100\%% error}{%d\%% error}
+    \ResultsFigTeaser{\%s: 100\%% time, 0\%% error}{%steaser_%s_%s}{%.2f\%% time, %sx error}{100\%% error (baseline)}{%d\%% error}
     \\vspace{-1ex}
     \caption{pl}
     \\vspace{2ex}
     \label{fig:teaser}
     \end{teaserfigure}
 
-    """ % (shader_name, tex_prefix, app_name, shader_name, data['input_time_frag'], int(data['perceptual'][2, 2] / data['perceptual'][1, 2] * 100), int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100))
+    """ % (shader_name, tex_prefix, app_name, shader_name, data['input_time_frag'], msaa_str, int(data['perceptual'][0, 2] / data['perceptual'][1, 2] * 100))
 
 
         open('result_figs/teaser.tex', 'w').write(str)
