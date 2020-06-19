@@ -1421,6 +1421,7 @@ def generate_parser():
     parser.add_argument('--which_epoch', dest='which_epoch', type=int, default=0, help='decide which epoch to read the checkpoint')
     parser.add_argument('--generate_timeline', dest='generate_timeline', action='store_true', help='generate timeline files')
     parser.add_argument('--add_initial_layers', dest='add_initial_layers', action='store_true', help='add initial conv layers without dilation')
+    parser.add_argument('--n_initial_layers', dest='n_initial_layers', type=int, default=3, help='number of initial layers added')
     parser.add_argument('--initial_layer_channels', dest='initial_layer_channels', type=int, default=-1, help='number of channels in initial layers')
     parser.add_argument('--conv_channel_multiplier', dest='conv_channel_multiplier', type=int, default=1, help='multiplier for conv channel')
     parser.add_argument('--add_final_layers', dest='add_final_layers', action='store_true', help='add final conv layers without dilation')
@@ -2730,7 +2731,7 @@ def main_network(args):
                 
                 if args.add_initial_layers:
                     
-                    for nlayer in range(3):
+                    for nlayer in range(args.n_initial_layers):
                         if ndims == 2:
                             input_to_network = slim.conv2d(input_to_network, actual_initial_layer_channels, [1, 1], rate=1, activation_fn=lrelu, normalizer_fn=nm, weights_initializer=identity_initializer(allow_map_to_less=True), scope='initial_'+str(nlayer), weights_regularizer=regularizer, padding=conv_padding)      
                         else:
@@ -2773,6 +2774,7 @@ def main_network(args):
                 if not args.geometry.startswith('boids'):
                     # 2D case
                     assert args.add_initial_layers
+                    assert args.n_initial_layers == 3
                     if args.is_train or args.collect_validate_loss:
                         input_labels = []
                         generated_frames = []
