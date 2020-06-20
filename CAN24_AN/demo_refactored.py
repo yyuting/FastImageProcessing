@@ -1595,6 +1595,7 @@ def generate_parser():
     parser.add_argument('--test_output_dir', dest='test_output_dir', default='', help='if specified, write output to this directory instead')
     parser.add_argument('--no_overwrite_option_file', dest='overwrite_option_file', action='store_false', help='if specified, do not overwrite option file even if the old one is outdated')
     parser.add_argument('--strict_clipping_inference', dest='strict_clipping_inference', action='store_true', help='if specified together with relax_clipping, scale to same range but do not allow out of range values')
+    parser.add_argument('--check_gt_variance', dest='check_gt_variance', type=float, default=-1, help='if positive, and if the gt of the mini-batch has a variance smaller than the set threshold, resample the batch from the dataset until the gt of the mini-batch has a variance larger than the threshold')
     
     parser.set_defaults(is_train=False)
     parser.set_defaults(use_batch=False)
@@ -3025,7 +3026,13 @@ def main_network(args):
     if not args.spatial_GAN:
         assert args.patch_gan_loss
         assert args.train_temporal_seq
-    
+        
+    if args.check_gt_variance > 0:
+        gt_variance = tf.reduce_mean(tf.math.reduce_variance(output, (0, 1, 2)))
+        update_cond = gt_variance > args.check_gt_variance
+    else:
+        update_cond = tf.no_op()
+
     if (args.debug_mode and args.mean_estimator):
         loss_to_opt = loss + regularizer_loss + sparsity_loss
         gen_loss_GAN = tf.constant(0.0)
@@ -3336,9 +3343,12 @@ def main_network(args):
                     # modify the penalty a little bit, don't want to deal with sqrt in tensorflow since it's not stable
                     gradient_penalty = tf.reduce_mean((sample_gradient ** 2.0 - 1.0) ** 2.0)
                     discrim_loss = discrim_loss + 10.0 * gradient_penalty
+                    
+            if args.check_gt_variance > 0:
+                discrim_loss = tf.cond(update_cond, lambda: discrim_loss, lambda: 0.0)
             
             with tf.name_scope("discriminator_train"):
-
+                
                 discrim_tvars = [var for var in tf.trainable_variables() if var.name.startswith("discriminator")]
                 discrim_optim = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
 
@@ -3376,6 +3386,9 @@ def main_network(args):
         else:
             gen_loss = loss
             
+        if args.check_gt_variance > 0:
+            gen_loss = tf.cond(update_cond, lambda: gen_loss, lambda: 0.0)
+            
         with tf.name_scope("generator_train"):
             if args.is_train:
                 dependency = [discrim_step]
@@ -3408,6 +3421,10 @@ def main_network(args):
         var_list = tf.trainable_variables()
 
         adam_before = adam_optimizer
+        
+        if args.check_gt_variance > 0:
+            loss_to_opt = tf.cond(update_cond, lambda: loss_to_opt, lambda: 0.0)
+        
         if args.update_bn:
             with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
                 opt=adam_optimizer.minimize(loss_to_opt,var_list=var_list)
@@ -3417,6 +3434,8 @@ def main_network(args):
         saver=tf.train.Saver(tf.trainable_variables(), max_to_keep=1000)
         savers = [saver]
         save_names = ['.']
+
+        
                     
         
     avg_loss = 0
@@ -3822,6 +3841,8 @@ def main_network(args):
             if target_channel_schedule is not None:
                 print("using target channel schedule")
                 feed_dict[target_channel] = target_channel_schedule[epoch-1]
+                
+            log_const_batch_idx = []
 
             for sub_epoch in range(sub_epochs):
 
@@ -4000,9 +4021,14 @@ def main_network(args):
 
                     st1 = time.time()
                     
-                    _,current, current_l2, current_sparsity, current_regularization, current_training, current_perceptual, current_gen_loss_GAN, current_discrim_loss, current_ind_val =sess.run([opt,loss, loss_l2, sparsity_loss, regularizer_loss, loss_to_opt, perceptual_loss_add, gen_loss_GAN, discrim_loss, current_ind],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
+                    _,current, current_l2, current_sparsity, current_regularization, current_training, current_perceptual, current_gen_loss_GAN, current_discrim_loss, current_ind_val, update_cond_val =sess.run([opt,loss, loss_l2, sparsity_loss, regularizer_loss, loss_to_opt, perceptual_loss_add, gen_loss_GAN, discrim_loss, current_ind, update_cond],feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
                     
                     st2 = time.time()
+                    
+                    if args.check_gt_variance > 0:
+                        if not update_cond_val:
+                            log_const_batch_idx.append(current_ind_val)
+                    
                     #_ = sess.run(opt, feed_dict=feed_dict)
                     #current, current_l2, current_sparsity, current_regularization, current_training, current_perceptual = sess.run([loss, loss_l2, sparsity_loss, regularizer_loss, loss_to_opt, perceptual_loss_add], feed_dict=feed_dict)
                     #current =sess.run(loss,feed_dict=feed_dict, options=run_options, run_metadata=run_metadata)
@@ -4036,6 +4062,11 @@ def main_network(args):
                     cnt += args.batch_size if args.use_batch else 1
                     print("%d %d %.5f %.5f %.2f %.2f %s %d"%(epoch,cnt,current,np.mean(all[np.where(all)]),time.time()-st, st2-st1,os.getcwd().split('/')[-2], current_slice[0]))
 
+            if args.check_gt_variance > 0:
+                print('%s inds are below the threshold' % len(log_const_batch_idx))
+                print(sorted(log_const_batch_idx))
+            
+            
             avg_loss = np.mean(all[np.where(all)])
             avg_loss_l2 = np.mean(all_l2[np.where(all_l2)])
             #avg_loss_sparsity = np.mean(all_sparsity[np.where(all_sparsity)])
