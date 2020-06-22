@@ -10,11 +10,11 @@ for root, dirs, files in os.walk(src_dir):
         if not file.endswith('.meta'):
             src_file = os.path.join(root, file)
             
-            current_src_dir = src_file.replace(src_dir, '')
-            if current_src_dir.startswith('/'):
-                current_src_dir = current_src_dir[1:]
+            rel_src_file = src_file.replace(src_dir, '')
+            if rel_src_file.startswith('/'):
+                rel_src_file = rel_src_file[1:]
             
-            dst_file = os.path.join(dst_dir, current_src_dir)
+            dst_file = os.path.join(dst_dir, rel_src_file)
             
             current_dst_dir, _ = os.path.split(dst_file)
             
