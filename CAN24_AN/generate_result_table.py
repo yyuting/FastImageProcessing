@@ -564,7 +564,7 @@ def main():
     \\begin{tabular}{c|ccc}
     \\hline
 
-        Shader & Distances: & Perceptual & L2 Error \\\\ \\thickhline
+        Shader & Method & Perceptual & L2 Error \\\\ \\thickhline
     """
 
             #for shader_name in sorted(app_shader_dir_200[app_name].keys()):
