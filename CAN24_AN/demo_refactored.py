@@ -3028,7 +3028,10 @@ def main_network(args):
         assert args.train_temporal_seq
         
     if args.check_gt_variance > 0:
-        gt_variance = tf.reduce_mean(tf.math.reduce_variance(output, (0, 1, 2)))
+        if hasattr(tf.math, 'reduce_variance'):
+            gt_variance = tf.reduce_mean(tf.math.reduce_variance(output, (0, 1, 2)))
+        else:
+            gt_variance = tf.reduce_mean(tf.reduce_mean(output ** 2, (0, 1, 2)) - tf.reduce_mean(output, (0, 1, 2)) ** 2)
         update_cond = gt_variance > args.check_gt_variance
     else:
         update_cond = tf.no_op()
