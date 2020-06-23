@@ -10,9 +10,13 @@ import matplotlib.patheffects as path_effects
 from matplotlib.patches import BoxStyle
 
 
-dirs = ['scratch/boids_res_20_64_validate_switch_label/test',
-        'scratch/boids_res_20_64_validate_switch_label_aux/test',
-        'scratch/boids_res_20_64_validate_switch_label/mean1_test']
+dirs = ['boids_all_no_relax_clipping/test',
+        '/mnt/shadermlnfs1/shadermlvm/playground/models/boids_aux_largest_capacity_ini_layers/test',
+        'boids_all/mean1_test']
+
+dirs = sys.argv[1:3]
+dirs.append('boids_all/mean1_test')
+name = sys.argv[3]
 
 def main():
     
@@ -58,7 +62,7 @@ def main():
     
     plt.legend(fontsize=fontsize)
     plt.tight_layout()
-    plt.savefig('result_figs/boids_metric.png')
+    plt.savefig('result_figs/boids_metric_%s.png' % name)
     
 if __name__ == '__main__':
     main()
