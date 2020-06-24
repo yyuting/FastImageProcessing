@@ -684,36 +684,7 @@ def main():
 
                         count += 1  
                         count_transpose += 1
-                        
-                if False:
-                    count = 0
-                    for col in range(2):
-                        for row in range(len(row_data_rel)):
-                            data_row = row_data_rel[row]
-                            idx = 2
-                            if col < 1:
-                                field = 'perceptual'
-                                argmin_idx = argmin_perceptual[idx]
-                            else:
-                                field = 'l2'
-                                argmin_idx = argmin_l2[idx]
-
-                            if row == 0:
-                                abs_val = '%.1e' % data[field][1, idx]
-                                val_before, val_after = abs_val.split('e')
-                                transpose_strs[count] = val_before
-                                count += 1
-                                transpose_strs[count] = val_after
-                            elif row == 2:
-                                current_ratio = data[field][data_row, idx] / data[field][1, idx]
-                                transpose_strs[count] = round_msaa(current_ratio)
-                            else:
-                                transpose_strs[count] = '%02d' % (data[field][data_row, idx] / data[field][1, idx] * 100)
-
-                            if data_row == argmin_idx:
-                                transpose_strs[count] = '\\textbf{' + transpose_strs[count] + '}'
-
-                            count += 1  
+                         
 
                 print_name = shader_name
                 if print_name not in hue_shaders.keys():
