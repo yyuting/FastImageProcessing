@@ -26,8 +26,11 @@ hue_shaders = {
 teaser_app = 'simplified'
 teaser_shader = 'venice'
 
-model_parent_dir = '/mnt/shadermlnfs1/shadermlvm/playground/models/'
-dataset_parent_dir = '/mnt/shadermlnfs1/shadermlvm/playground/datasets/'
+#model_parent_dir = '/mnt/shadermlnfs1/shadermlvm/playground/models/'
+#dataset_parent_dir = '/mnt/shadermlnfs1/shadermlvm/playground/datasets/'
+
+model_parent_dir = '/n/fs/visualai-scr/yutingy/models_from_azure'
+dataset_parent_dir = '/n/fs/visualai-scr/yutingy/datasets'
 
 tex_prefix = 'new_submission/'
 
@@ -536,6 +539,8 @@ def main():
         str = ""
         
         str_short = ""
+        
+        str_transpose = ""
 
         for k in range(len(app_names)):
 
@@ -566,6 +571,28 @@ def main():
 
         Shader & Method & Perceptual & L2 Error \\\\ \\thickhline
     """
+            
+            if app_name == 'denoising':
+                str_transpose += """
+    \\vspace{-1ex}
+    \setlength{\\tabcolsep}{4.0pt}
+    \\begin{table}[]
+    \\begin{tabular}{c|r@{e}l@{ / }r@{e}lr@{\\%}l@{ / }r@{\\%}lr@{x}l@{ / }r@{x}l}
+    \\hline
+
+        Shader & \multicolumn{4}{c}{RGBx} & \multicolumn{4}{c}{Ours} & \multicolumn{4}{c}{Super} \\\\ \\thickhline
+    """
+            else:
+                str_transpose += """
+    \\vspace{-1ex}
+    \setlength{\\tabcolsep}{4.0pt}
+    \\begin{table}[]
+    \\begin{tabular}{c|r@{e}l@{ / }r@{e}lr@{\\%}l@{ / }r@{\\%}l}
+    \\hline
+
+        Shader & \multicolumn{4}{c}{RGBx} & \multicolumn{4}{c}{Ours} \\\\ \\thickhline
+    """
+                
 
             #for shader_name in sorted(app_shader_dir_200[app_name].keys()):
             for i in range(len(app_shader_dir_200[app_name].keys())):
@@ -589,6 +616,7 @@ def main():
 
                 data_strs = [None] * 4 * len(row_data_rel)
                 avg_strs = [None] * 2 * len(row_data_rel)
+                transpose_strs = [None] * (2 * len(row_data_rel) + 2)
 
                 for row in range(len(row_data_rel)):
                     for col in range(4):
@@ -617,6 +645,7 @@ def main():
                         count += 1
                        
                 count = 0
+                count_transpose = 0
                 for row in range(len(row_data_rel)):
                     for col in range(2):
                         data_row = row_data_rel[row]
@@ -630,17 +659,61 @@ def main():
 
                         if row == 0:
                             avg_strs[count] = '%.1e' % data[field][1, idx]
+                            
+                            abs_val = avg_strs[count]
+                            val_before, val_after = abs_val.split('e')
+                            transpose_strs[count_transpose] = val_before
+                            count_transpose += 1
+                            transpose_strs[count_transpose] = val_after
+                            
                         elif row == 2:
                             # MSAA
                             current_ratio = data[field][data_row, idx] / data[field][1, idx]
                             avg_strs[count] = round_msaa(current_ratio)
+                            
+                            transpose_strs[count_transpose] = avg_strs[count]
                         else:
                             avg_strs[count] = '%02d' % (data[field][data_row, idx] / data[field][1, idx] * 100)
+                            
+                            transpose_strs[count_transpose] = avg_strs[count]
 
                         if data_row == argmin_idx:
                             avg_strs[count] = '\\textbf{' + avg_strs[count] + '}'
+                            
+                            transpose_strs[count_transpose] = '\\textbf{' + transpose_strs[count_transpose] + '}'
 
                         count += 1  
+                        count_transpose += 1
+                        
+                if False:
+                    count = 0
+                    for col in range(2):
+                        for row in range(len(row_data_rel)):
+                            data_row = row_data_rel[row]
+                            idx = 2
+                            if col < 1:
+                                field = 'perceptual'
+                                argmin_idx = argmin_perceptual[idx]
+                            else:
+                                field = 'l2'
+                                argmin_idx = argmin_l2[idx]
+
+                            if row == 0:
+                                abs_val = '%.1e' % data[field][1, idx]
+                                val_before, val_after = abs_val.split('e')
+                                transpose_strs[count] = val_before
+                                count += 1
+                                transpose_strs[count] = val_after
+                            elif row == 2:
+                                current_ratio = data[field][data_row, idx] / data[field][1, idx]
+                                transpose_strs[count] = round_msaa(current_ratio)
+                            else:
+                                transpose_strs[count] = '%02d' % (data[field][data_row, idx] / data[field][1, idx] * 100)
+
+                            if data_row == argmin_idx:
+                                transpose_strs[count] = '\\textbf{' + transpose_strs[count] + '}'
+
+                            count += 1  
 
                 print_name = shader_name
                 if print_name not in hue_shaders.keys():
@@ -660,6 +733,9 @@ def main():
         \multicolumn{1}{c|}{} & Ours & %s\%% & %s\%% \\\\ \cline{2-4}
         \multicolumn{1}{c|}{} & Supersample & %sx & %sx \\\\ \\thickhline""" % ((print_name, ) + tuple(avg_strs))
                     
+                    str_transpose += """
+        \\%s & %s & %s & %s & %s & %s & & %s & & %s & & %s & \\\\ \\thickhline""" % ((print_name, ) + tuple(transpose_strs))
+                    
                 else:
                     str += """
     \multicolumn{1}{c|}{\multirow{2}{*}{\\begin{tabular}[c]{@{}c@{}}\\%s \end{tabular}}} & RGBx & %s & %s & %s & %s \\\\ \cline{2-6} 
@@ -668,6 +744,9 @@ def main():
                     str_short += """
     \multicolumn{1}{c|}{\multirow{2}{*}{\\begin{tabular}[c]{@{}c@{}}\\%s \end{tabular}}} & RGBx & %s & %s \\\\ \cline{2-4} 
         \multicolumn{1}{c|}{} & Ours & %s\%% & %s\%% \\\\ \\thickhline""" % ((print_name, ) + tuple(avg_strs))
+                    
+                    str_transpose += """
+         \\%s & %s & %s & %s & %s & %s & & %s & \\\\ \\thickhline""" % ((print_name, ) + tuple(transpose_strs))
 
             
             print('avg ratio for', app_name)
@@ -685,9 +764,16 @@ def main():
     \caption{%s}
     \end{table}
     """ % app_name.replace('_', '\\ ')
+            
+            str_transpose = str_transpose[:-11] + '\hline' + """
+    \end{tabular}
+    \caption{%s}
+    \end{table}
+    """ % app_name.replace('_', '\\ ')
 
         open('result_figs/supplemental.tex', 'w').write(str)
         open('result_figs/short_table.tex', 'w').write(str_short)
+        open('result_figs/transpose_table.tex', 'w').write(str_transpose)
     
     
     if 'fig' in mode or mode == 'all':
