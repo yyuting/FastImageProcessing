@@ -222,6 +222,41 @@ app_shader_dir_200 = {
 'simulation': {
     'boids': {'dir': ['/n/fs/visualai-scr/yutingy/boids_res_20_64_validate_switch_label/test',
               '/n/fs/visualai-scr/yutingy/boids_res_20_64_validate_switch_label_aux/test']}
+    },
+'unified': {
+    'mandelbrot': {'dir': ['1x_1sample_unified_mandelbrot_mandelbulb_trippy_primitives_with_bg_automatic_200/test_mandelbrot',
+                           '1x_1sample_unified_mandelbrot_mandelbulb_trippy_primitives_with_bg_aux_largest_capacity/test_mandelbrot'],
+                   'img_idx': 30,
+                   'img_zoom_bbox': [250, 250+80, 570, 570+60],
+                   'gt_dir': 'datas_mandelbrot/test_img',
+                   'msaa_sample': 5,
+                   'print': 'Mandelbrot'
+                  },
+    'mandelbulb': {'dir': ['1x_1sample_unified_mandelbrot_mandelbulb_trippy_primitives_with_bg_automatic_200/test_mandelbulb_slim',
+                           '1x_1sample_unified_mandelbrot_mandelbulb_trippy_primitives_with_bg_aux_largest_capacity/test_mandelbulb_slim'],
+                   'img_idx': 20,
+                   'img_zoom_bbox': [250, 250+80, 325, 325+60],
+                   'gt_dir': 'datas_mandelbulb/test_img',
+                   'msaa_sample': 2,
+                   'print': 'Mandelbulb'
+                  },
+    'trippy': {'dir': ['1x_1sample_unified_mandelbrot_mandelbulb_trippy_primitives_with_bg_automatic_200/test_trippy_heart_new',
+                           '1x_1sample_unified_mandelbrot_mandelbulb_trippy_primitives_with_bg_aux_largest_capacity/test_trippy_heart_new'],
+                   'img_idx': 30,
+                   'img_zoom_bbox': [550, 550+80, 65, 65+60],
+                   'gt_dir': 'datas_trippy_new_extrapolation_subsample_2/test_img',
+                   'msaa_sample': 9,
+                   'print': 'Trippy Heart'
+                  },
+    'primitives': {'dir': ['1x_1sample_unified_mandelbrot_mandelbulb_trippy_primitives_with_bg_automatic_200/test_primitives_wheel_only_new',
+                           '1x_1sample_unified_mandelbrot_mandelbulb_trippy_primitives_with_bg_aux_largest_capacity/test_primitives_wheel_only_new'],
+                   'img_idx': 15,
+                   'img_zoom_bbox': [420, 420+80, 600, 600+60],
+                   'gt_dir': 'datas_primitives_correct_test_range/test_img',
+                   'msaa_sample': 1,
+                   #'crop_box': [80, -180, 115, -275],
+                   'print': 'Gear'
+                  }
     }
 }
 
@@ -249,6 +284,89 @@ def round_msaa(current_ratio):
     else:
         ans = '%.2f' % current_ratio
     return ans
+
+def get_score(dirs, app_name):
+
+    neval = len(dirs)
+    if app_name == 'denoising':
+        assert neval == 3
+    else:
+        assert neval >= 2
+        #neval = 2
+
+    score = -np.ones((neval, 3))
+    l2_score = -np.ones((neval, 3))
+
+    for i in range(neval):
+
+        if app_name in ['denoising', 'simplified'] and i == neval - 1:
+            additional_dir = 'out_inference_time'
+        else:
+            additional_dir = ''
+
+        dir = dirs[i]
+
+        if app_name != 'temporal':
+            perceptual_breakdown_file = os.path.join(model_parent_dir, additional_dir, dir, 'perceptual_tf_breakdown.txt')
+        else:
+            perceptual_breakdown_file = os.path.join(model_parent_dir, additional_dir, dir, 'vgg_breakdown.txt') 
+
+        perceptual_single_file = os.path.join(model_parent_dir, additional_dir, dir, 'vgg.txt')
+        l2_single_file = os.path.join(model_parent_dir, additional_dir, dir, 'all_loss.txt')
+
+        if app_name in ['denoising', 'simplified', 'post_processing', 'temporal', 'unified']:
+
+            if os.path.exists(perceptual_breakdown_file):
+                perceptual_scores = open(perceptual_breakdown_file).read()
+            else:
+                assert allow_missing_MSAA and app_name in ['denoising', 'simplified'] and i == neval - 1, perceptual_breakdown_file
+                perceptual_scores = '1,1,1'
+
+            perceptual_scores.replace('\n', '')
+            perceptual_scores.replace(' ', '')
+            perceptual_scores = perceptual_scores.split(',')
+            perceptual_scores = [float(score) for score in perceptual_scores]
+            score[i][0] = perceptual_scores[2]
+            score[i][1] = (perceptual_scores[0] + perceptual_scores[1]) / 2.0
+            score[i][2] = (perceptual_scores[0] * 5 + perceptual_scores[1] * 5 + perceptual_scores[2] * 20) / 30
+        #elif app_name == 'temporal':
+        #    perceptual_scores = open(perceptual_single_file).read()
+        #    score[i][2] = float(perceptual_scores)
+        elif app_name == 'simulation':
+            l2_scores = open(l2_single_file).read()
+            l2_scores.replace('\n', '')
+            l2_scores.replace(' ', '')
+            l2_scores = l2_scores.split(',')
+            l2_scores = [float(score) for score in l2_scores]
+            score[i][0] = l2_scores[1]
+            score[i][1] = l2_scores[0]
+            score[i][2] = l2_scores[1]
+        else:
+            raise
+
+        if app_name not in ['simulation']:
+
+            l2_breakdown_file = os.path.join(model_parent_dir, additional_dir, dir, 'score_breakdown.txt')
+
+            if os.path.exists(l2_breakdown_file):
+                l2_scores = open(l2_breakdown_file).read()
+            else:
+                assert allow_missing_MSAA and app_name in ['denoising', 'simplified'] and i == neval - 1
+                l2_scores = '1,1,1'
+
+            l2_scores.replace('\n', '')
+            l2_scores.replace(' ', '')
+            l2_scores = l2_scores.split(',')
+            l2_scores = [float(score) for score in l2_scores]
+            l2_score[i][0] = l2_scores[2]
+            l2_score[i][1] = (l2_scores[0] + l2_scores[1]) / 2.0
+            l2_score[i][2] = (l2_scores[0] * 5 + l2_scores[1] * 5 + l2_scores[2] * 20) / 30
+
+    if app_name == 'temporal':
+        # scale for temporal perceptual needs to be adjusted
+        score /= 0.04
+        
+    return score, l2_score
 
 def main():
     if len(sys.argv) > 1:
@@ -315,78 +433,8 @@ def main():
             else:
                 assert neval >= 2
                 #neval = 2
-
-            score = -np.ones((neval, 3))
-            l2_score = -np.ones((neval, 3))
-
-            for i in range(neval):
                 
-                if app_name in ['denoising', 'simplified'] and i == neval - 1:
-                    additional_dir = 'out_inference_time'
-                else:
-                    additional_dir = ''
-
-                dir = app_data[shader_name]['dir'][i]
-
-                if app_name != 'temporal':
-                    perceptual_breakdown_file = os.path.join(model_parent_dir, additional_dir, dir, 'perceptual_tf_breakdown.txt')
-                else:
-                    perceptual_breakdown_file = os.path.join(model_parent_dir, additional_dir, dir, 'vgg_breakdown.txt') 
-                
-                perceptual_single_file = os.path.join(model_parent_dir, additional_dir, dir, 'vgg.txt')
-                l2_single_file = os.path.join(model_parent_dir, additional_dir, dir, 'all_loss.txt')
-
-                if app_name in ['denoising', 'simplified', 'post_processing', 'temporal']:
-                    
-                    if os.path.exists(perceptual_breakdown_file):
-                        perceptual_scores = open(perceptual_breakdown_file).read()
-                    else:
-                        assert allow_missing_MSAA and app_name in ['denoising', 'simplified'] and i == neval - 1, perceptual_breakdown_file
-                        perceptual_scores = '1,1,1'
-                    
-                    perceptual_scores.replace('\n', '')
-                    perceptual_scores.replace(' ', '')
-                    perceptual_scores = perceptual_scores.split(',')
-                    perceptual_scores = [float(score) for score in perceptual_scores]
-                    score[i][0] = perceptual_scores[2]
-                    score[i][1] = (perceptual_scores[0] + perceptual_scores[1]) / 2.0
-                    score[i][2] = (perceptual_scores[0] * 5 + perceptual_scores[1] * 5 + perceptual_scores[2] * 20) / 30
-                #elif app_name == 'temporal':
-                #    perceptual_scores = open(perceptual_single_file).read()
-                #    score[i][2] = float(perceptual_scores)
-                elif app_name == 'simulation':
-                    l2_scores = open(l2_single_file).read()
-                    l2_scores.replace('\n', '')
-                    l2_scores.replace(' ', '')
-                    l2_scores = l2_scores.split(',')
-                    l2_scores = [float(score) for score in l2_scores]
-                    score[i][0] = l2_scores[1]
-                    score[i][1] = l2_scores[0]
-                    score[i][2] = l2_scores[1]
-                else:
-                    raise
-
-                if app_name not in ['simulation']:
-                    
-                    l2_breakdown_file = os.path.join(model_parent_dir, additional_dir, dir, 'score_breakdown.txt')
-                    
-                    if os.path.exists(l2_breakdown_file):
-                        l2_scores = open(l2_breakdown_file).read()
-                    else:
-                        assert allow_missing_MSAA and app_name in ['denoising', 'simplified'] and i == neval - 1
-                        l2_scores = '1,1,1'
-                        
-                    l2_scores.replace('\n', '')
-                    l2_scores.replace(' ', '')
-                    l2_scores = l2_scores.split(',')
-                    l2_scores = [float(score) for score in l2_scores]
-                    l2_score[i][0] = l2_scores[2]
-                    l2_score[i][1] = (l2_scores[0] + l2_scores[1]) / 2.0
-                    l2_score[i][2] = (l2_scores[0] * 5 + l2_scores[1] * 5 + l2_scores[2] * 20) / 30
-
-            if app_name == 'temporal':
-                # scale for temporal perceptual needs to be adjusted
-                score /= 0.04
+            score, l2_score = get_score(app_data[shader_name]['dir'], app_name)
             
             bar_avg.append(score[0, 2] / score[1, 2])
             if score[0, 1] > 0:
@@ -407,6 +455,14 @@ def main():
         bar_sim.append(0)
         bar_col.append((0, 0, 0))
         bar_edge_width.append(0)
+        
+    for app_name in app_shader_dir_200.keys():
+        if app_name not in app_names:
+            app_data = app_shader_dir_200[app_name]
+            for shader_name in app_data.keys():
+                score, l2_score = get_score(app_data[shader_name]['dir'], app_name)
+                app_data[shader_name]['perceptual'] = score
+                app_data[shader_name]['l2'] = l2_score
 
     if 'bar' in mode or mode == 'all':
         
@@ -542,9 +598,10 @@ def main():
         
         str_transpose = ""
 
-        for k in range(len(app_names)):
-
-            app_name = app_names[k]
+        #for k in range(len(app_names)):
+            #app_name = app_names[k]
+            
+        for app_name in sorted(app_shader_dir_200.keys()):
             
             if app_name in ['simulation']:
                 continue
@@ -581,6 +638,16 @@ def main():
     \\hline
 
         Shader & \multicolumn{4}{c}{RGBx} & \multicolumn{4}{c}{Ours} & \multicolumn{4}{c}{Super} \\\\ \\thickhline
+    """
+            elif app_name == 'post_processing':
+                str_transpose += """
+    \\vspace{-1ex}
+    \setlength{\\tabcolsep}{4.0pt}
+    \\begin{table}[]
+    \\begin{tabular}{c|cc}
+    \\hline
+
+        Shader & RGBx & Ours \\\\ \\thickhline
     """
             else:
                 str_transpose += """
@@ -716,7 +783,20 @@ def main():
     \multicolumn{1}{c|}{\multirow{2}{*}{\\begin{tabular}[c]{@{}c@{}}\\%s \end{tabular}}} & RGBx & %s & %s \\\\ \cline{2-4} 
         \multicolumn{1}{c|}{} & Ours & %s\%% & %s\%% \\\\ \\thickhline""" % ((print_name, ) + tuple(avg_strs))
                     
-                    str_transpose += """
+                    if app_name == 'post_processing':
+                        
+                        print_names = print_name.split('\\\\')
+                        assert len(print_names) == 2
+                        print_a = print_names[0]
+                        print_b = print_names[1]
+                        
+                        str_transpose += """
+        \\%s & \\multirow{2}{*}{%se%s / %se%s} & \\multirow{2}{*}{%s\%% / %s\%%} \\\\
+        %s & & \\\\ \\thickhline""" % ((print_a,) + tuple(transpose_strs) + (print_b,))
+                        
+                    else:
+                    
+                        str_transpose += """
          \\%s & %s & %s & %s & %s & %s & & %s & \\\\ \\thickhline""" % ((print_name, ) + tuple(transpose_strs))
 
             
