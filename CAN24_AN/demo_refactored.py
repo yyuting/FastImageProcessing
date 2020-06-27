@@ -1596,6 +1596,7 @@ def generate_parser():
     parser.add_argument('--no_overwrite_option_file', dest='overwrite_option_file', action='store_false', help='if specified, do not overwrite option file even if the old one is outdated')
     parser.add_argument('--strict_clipping_inference', dest='strict_clipping_inference', action='store_true', help='if specified together with relax_clipping, scale to same range but do not allow out of range values')
     parser.add_argument('--check_gt_variance', dest='check_gt_variance', type=float, default=-1, help='if positive, and if the gt of the mini-batch has a variance smaller than the set threshold, resample the batch from the dataset until the gt of the mini-batch has a variance larger than the threshold')
+    parser.add_argument('--allow_non_gan_low_var', dest='allow_non_gan_low_var', action='store_true', help='if specified, allow non gan loss still propagate gradient to low variance mini batch')
     
     parser.set_defaults(is_train=False)
     parser.set_defaults(use_batch=False)
@@ -1700,6 +1701,7 @@ def generate_parser():
     parser.set_defaults(get_col_aux_inds=False)
     parser.set_defaults(overwrite_option_file=True)
     parser.set_defaults(strict_clipping_inference=False)
+    parser.set_defaults(allow_non_gan_low_var=False)
     
     return parser
 
@@ -3390,7 +3392,10 @@ def main_network(args):
             gen_loss = loss
             
         if args.check_gt_variance > 0:
-            gen_loss = tf.cond(update_cond, lambda: gen_loss, lambda: 0.0)
+            if args.allow_non_gan_low_var:
+                gen_loss = tf.cond(update_cond, lambda: gen_loss, lambda: loss)
+            else:
+                gen_loss = tf.cond(update_cond, lambda: gen_loss, lambda: 0.0)
             
         with tf.name_scope("generator_train"):
             if args.is_train:
