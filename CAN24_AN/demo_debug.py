@@ -63,7 +63,7 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
     sess = tf.Session()
     sess.run(tf.local_variables_initializer())
 
-    for compiler_problem_idx in [1]:
+    for compiler_problem_idx in [2]:
         if compiler_problem_idx < 0:
             compiler_problem_full_name = os.path.abspath(os.path.join(name, 'compiler_problem.py'))
         else:
@@ -192,9 +192,9 @@ def get_tensors(dataroot, name, camera_pos, shader_time, output_type='remove_con
 
             for i in range(len(arrs)):
                 skimage.io.imsave('test%d.png' % i, np.clip(arrs[i], 0, 1))
-                print(np.allclose(arrs[0], arrs[i]))
+                assert np.allclose(arrs[0], arrs[i])
 
-            print(len(out_features))
+            #print(len(out_features))
     
     return
     
