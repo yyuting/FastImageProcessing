@@ -1597,6 +1597,8 @@ def generate_parser():
     parser.add_argument('--strict_clipping_inference', dest='strict_clipping_inference', action='store_true', help='if specified together with relax_clipping, scale to same range but do not allow out of range values')
     parser.add_argument('--check_gt_variance', dest='check_gt_variance', type=float, default=-1, help='if positive, and if the gt of the mini-batch has a variance smaller than the set threshold, resample the batch from the dataset until the gt of the mini-batch has a variance larger than the threshold')
     parser.add_argument('--allow_non_gan_low_var', dest='allow_non_gan_low_var', action='store_true', help='if specified, allow non gan loss still propagate gradient to low variance mini batch')
+    parser.add_argument('--generate_adjacent_seq', dest='generate_adjacent_seq', action='store_true', help='if specifie, generated the last two adjacent frames of the seq, seq length determined by inference_seq_len')
+    parser.add_argument('--nrepeat', dest='nrepeat', type=int, default=1, help='if specified, repeat the inference multiple times')
     
     parser.set_defaults(is_train=False)
     parser.set_defaults(use_batch=False)
@@ -1702,6 +1704,7 @@ def generate_parser():
     parser.set_defaults(overwrite_option_file=True)
     parser.set_defaults(strict_clipping_inference=False)
     parser.set_defaults(allow_non_gan_low_var=False)
+    parser.set_defaults(generate_adjacent_seq=False)
     
     return parser
 
@@ -1766,6 +1769,8 @@ def copy_option(args):
     delattr(new_args, 'alt_ckpt_base_dir')
     delattr(new_args, 'boids_seq_metric')
     delattr(new_args, 'strict_clipping_inference')
+    delattr(new_args, 'generate_adjacent_seq')
+    delattr(new_args, 'nrepeat')
     return new_args
 
 def main_network(args):
@@ -4215,9 +4220,16 @@ def main_network(args):
                     for id in range(len(validate_add_names)):
                         all_adds[id, :, :, 0] = read_name(validate_add_names[id], True)
                 
-            # stored in the order of
-            # epoch, current, current_l2, current_perceptual, current_gen, current_discrim
-            all_vals = []
+            validation_data_name = os.path.join(args.name, 'validation.npy')
+            if os.path.exists(validation_data_name):
+                print('existing previous validation result, start from there')
+                raw_validation_vals = np.load(validation_data_name)
+                all_vals = raw_validation_vals.tolist()
+            else:
+                raw_validation_vals = None
+                # stored in the order of
+                # epoch, current, current_l2, current_perceptual, current_gen, current_discrim
+                all_vals = []
                         
             all_example_vals = np.empty([time_vals.shape[0], 6])
                 
@@ -4231,6 +4243,13 @@ def main_network(args):
                 
                 if not success:
                     continue
+                    
+                if raw_validation_vals is not None:
+                    if epoch in raw_validation_vals[:, 0]:
+                        print('skipping epoch %d as it is already computed in previous result' % epoch)
+                        continue
+                    else:
+                        assert epoch > np.max(raw_validation_vals[:, 0])
                     
                 ckpts = [None] * len(savers)
                 for c_i in range(len(savers)):
@@ -4273,7 +4292,7 @@ def main_network(args):
                 all_vals.append(np.mean(all_example_vals, 0))
             
             all_vals = np.array(all_vals)
-            np.save(os.path.join(args.name, 'validation.npy'), all_vals)
+            np.save(validation_data_name, all_vals)
             open(os.path.join(args.name, 'validation.txt'), 'w').write('validation dataset: %s\n raw data stored in: %s\n' % (args.dataroot, os.uname().nodename))
             
             min_idx = np.argsort(all_vals[:, 1])
@@ -4352,6 +4371,8 @@ def main_network(args):
 
 
             debug_dir += '_zero_out_sparsity_vec' if args.zero_out_sparsity_vec else ''
+            
+            debug_dir += '_adjacent' if args.generate_adjacent_seq else ''
 
             if read_from_epoch:
                 debug_dir += "_epoch_%04d"%args.which_epoch
@@ -4709,319 +4730,341 @@ def main_network(args):
                         if args.train_with_random_rotation:
                             feed_dict[rotate] = 0
                             feed_dict[flip] = 0
-                        if not args.use_queue:
+                            
+                        if args.nrepeat < 1:
+                            args.nrepeat = 1
+                        
+                        for repeat in range(args.nrepeat):
+                            if not args.use_queue:
 
-                            if args.learn_loss_proxy and args.proxy_loss_type == 'from_data':
-                                target_pl_idx = i // ncameras
-                                source_idx = i % ncameras
-                                feed_dict[output_pl] = np.expand_dims(np.expand_dims(gt_loss_train[target_pl_idx, source_idx], 0), 3)
-                                feed_dict[shader_time] = [time_vals[source_idx]]
-                                feed_dict[camera_pos] = np.expand_dims(camera_pos_vals[source_idx, :], axis=1)
-                                feed_dict[target_pl] = np.expand_dims(read_name(val_img_names[target_pl_idx], False, False), 0)
-                            else:    
-                                camera_val = np.expand_dims(camera_pos_vals[i, :], axis=1)
-                                #feed_dict = {camera_pos: camera_val, shader_time: time_vals[i:i+1]}
-                                feed_dict[camera_pos] = camera_val
-                                feed_dict[shader_time] = time_vals[i:i+1]
-
-                                if args.use_dataroot and args.temporal_texture_buffer:
-                                    # TODO: this only works for fluid approx app
-                                    camera_val = np.empty([33, 1])
-                                    camera_val[:, 0] = np.reshape(camera_pos_vals[i*10:i*10+11, 3:], 33)
+                                if args.learn_loss_proxy and args.proxy_loss_type == 'from_data':
+                                    target_pl_idx = i // ncameras
+                                    source_idx = i % ncameras
+                                    feed_dict[output_pl] = np.expand_dims(np.expand_dims(gt_loss_train[target_pl_idx, source_idx], 0), 3)
+                                    feed_dict[shader_time] = [time_vals[source_idx]]
+                                    feed_dict[camera_pos] = np.expand_dims(camera_pos_vals[source_idx, :], axis=1)
+                                    feed_dict[target_pl] = np.expand_dims(read_name(val_img_names[target_pl_idx], False, False), 0)
+                                else:    
+                                    camera_val = np.expand_dims(camera_pos_vals[i, :], axis=1)
+                                    #feed_dict = {camera_pos: camera_val, shader_time: time_vals[i:i+1]}
                                     feed_dict[camera_pos] = camera_val
-                                    feed_dict[shader_time] = time_vals[i*10:i*10+1]
+                                    feed_dict[shader_time] = time_vals[i:i+1]
+
+                                    if args.use_dataroot and args.temporal_texture_buffer:
+                                        # TODO: this only works for fluid approx app
+                                        camera_val = np.empty([33, 1])
+                                        camera_val[:, 0] = np.reshape(camera_pos_vals[i*10:i*10+11, 3:], 33)
+                                        feed_dict[camera_pos] = camera_val
+                                        feed_dict[shader_time] = time_vals[i*10:i*10+1]
 
 
-                                if args.use_dataroot:
-                                    if args.temporal_texture_buffer:
-                                        output_ground = np.empty([1, output_pl.shape[1].value, output_pl.shape[2].value, output_nc])
-                                        # a hack to read 10 frames after selected idx in fluid approx mode
-                                        # at first we only test inference on input with every 10 frames
-                                        # so that output frame will be non overlapping
-                                        # for index i, output gt is i+1 to i+10
-                                        for seq_id in range(10):
-                                            output_ground[0, :, :, seq_id*3:seq_id*3+3] = read_name(val_img_names[i*10+seq_id+1], False)
+                                    if args.use_dataroot:
+                                        if args.temporal_texture_buffer:
+                                            output_ground = np.empty([1, output_pl.shape[1].value, output_pl.shape[2].value, output_nc])
+                                            # a hack to read 10 frames after selected idx in fluid approx mode
+                                            # at first we only test inference on input with every 10 frames
+                                            # so that output frame will be non overlapping
+                                            # for index i, output gt is i+1 to i+10
+                                            for seq_id in range(10):
+                                                output_ground[0, :, :, seq_id*3:seq_id*3+3] = read_name(val_img_names[i*10+seq_id+1], False)
 
 
-                                        current_texture_maps = np.transpose(np.load(val_img_names[i*10]), (2, 0, 1))
-                                        with warnings.catch_warnings():
-                                            warnings.simplefilter("ignore")
-                                            if not (current_texture_maps.shape[1] == height and current_texture_maps.shape[2] == width):
-                                                current_texture_maps = skimage.transform.resize(current_texture_maps, (current_texture_maps.shape[0], height, width))
-                                        for k in range(len(texture_maps)):
-                                            feed_dict[texture_maps[k]] = current_texture_maps[k]
-                                    elif args.train_temporal_seq:
-                                        output_ground = None
-                                    else:
-                                        if args.learn_loss_proxy:
-
-                                            # placeholder sampling stragety for target output
-                                            # for each example, compute the loss twoce
-                                            # once with the target that is exactly the same as the expected output
-                                            # another time use the next wrapped len(dataset) // 2 index
-
-                                            output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
-
-                                            target_idx = (i + len(val_img_names) // 2) % (len(val_img_names))
-                                            target_ground = np.expand_dims(read_name(val_img_names[target_idx], False, False), 0)
-
+                                            current_texture_maps = np.transpose(np.load(val_img_names[i*10]), (2, 0, 1))
+                                            with warnings.catch_warnings():
+                                                warnings.simplefilter("ignore")
+                                                if not (current_texture_maps.shape[1] == height and current_texture_maps.shape[2] == width):
+                                                    current_texture_maps = skimage.transform.resize(current_texture_maps, (current_texture_maps.shape[0], height, width))
+                                            for k in range(len(texture_maps)):
+                                                feed_dict[texture_maps[k]] = current_texture_maps[k]
+                                        elif args.train_temporal_seq:
+                                            output_ground = None
                                         else:
-                                            output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
+                                            if args.learn_loss_proxy:
 
+                                                # placeholder sampling stragety for target output
+                                                # for each example, compute the loss twoce
+                                                # once with the target that is exactly the same as the expected output
+                                                # another time use the next wrapped len(dataset) // 2 index
 
-                                else:
-                                    output_ground = np.empty([1, args.input_h, args.input_w, 3])
+                                                output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
 
-                                if args.tile_only:
-                                    if not inference_entire_img_valid:
-                                        feed_dict[h_start] = tile_start_vals[i:i+1, 0] - padding_offset / 2
-                                        feed_dict[w_start] = tile_start_vals[i:i+1, 1] - padding_offset / 2
-                                    else:
-                                        feed_dict[h_start] = np.array([- padding_offset / 2])
-                                        feed_dict[w_start] = np.array([- padding_offset / 2])
-                                if output_ground is not None:
-                                    feed_dict[output_pl] = output_ground
-                                if args.additional_input:
-                                    feed_dict[additional_input_pl] = np.expand_dims(np.expand_dims(read_name(val_add_names[i], True), axis=2), axis=0)
+                                                target_idx = (i + len(val_img_names) // 2) % (len(val_img_names))
+                                                target_ground = np.expand_dims(read_name(val_img_names[target_idx], False, False), 0)
 
-
-                        #output_buffer = numpy.zeros(output_ground.shape)
-                        if not args.train_temporal_seq:
-                            output_buffer = np.zeros([1, args.input_h, args.input_w, output_nc])
-                        else:
-                            output_buffer = np.zeros([1, args.input_h, args.input_w, output_nc*(args.inference_seq_len - args.nframes_temporal_gen + 1)])
-
-                        st = time.time()
-                        if args.tiled_training:
-                            assert not args.use_queue
-                            st_sum = 0
-                            timeline_sum = 0
-                            l2_loss_val = 0
-                            grad_loss_val = 0
-                            perceptual_loss_val = 0
-                            output_patch = numpy.zeros((1, int(height/ntiles_h), int(width/ntiles_w), 3))
-                            if not args.mean_estimator:
-                                feed_dict[feed_samples[0]] = numpy.random.normal(size=(1, height+padding_offset, width+padding_offset))
-                                feed_dict[feed_samples[1]] = numpy.random.normal(size=(1, height+padding_offset, width+padding_offset))
-                            else:
-                                feed_dict[feed_samples[0]] = numpy.random.normal(size=(args.estimator_samples, height+padding_offset, width+padding_offset))
-                                feed_dict[feed_samples[1]] = numpy.random.normal(size=(args.estimator_samples, height+padding_offset, width+padding_offset))
-                            for tile_h in range(int(ntiles_h)):
-                                for tile_w in range(int(ntiles_w)):
-                                    tiled_feed_dict = {}
-                                    tiled_feed_dict[h_start] = np.array([tile_h * height / ntiles_h - padding_offset / 2])
-                                    tiled_feed_dict[w_start] = np.array([tile_w * width / ntiles_w - padding_offset / 2])
-                                    for key, value in feed_dict.items():
-                                        if isinstance(value, numpy.ndarray) and len(value.shape) >= 3 and value.shape[1] == height and value.shape[2] == width:
-                                            if len(value.shape) == 3:
-                                                tiled_value = value[:, int(tile_h*height/ntiles_h):int((tile_h+1)*height/ntiles_h), int(tile_w*width/ntiles_w):int((tile_w+1)*width/ntiles_w)]
                                             else:
-                                                tiled_value = value[:, int(tile_h*height/ntiles_h):int((tile_h+1)*height/ntiles_h), int(tile_w*width/ntiles_w):int((tile_w+1)*width/ntiles_w), :]
-                                            tiled_feed_dict[key] = tiled_value
+                                                output_ground = np.expand_dims(read_name(val_img_names[i], False, False), 0)
+
+
+                                    else:
+                                        output_ground = np.empty([1, args.input_h, args.input_w, 3])
+
+                                    if args.tile_only:
+                                        if not inference_entire_img_valid:
+                                            feed_dict[h_start] = tile_start_vals[i:i+1, 0] - padding_offset / 2
+                                            feed_dict[w_start] = tile_start_vals[i:i+1, 1] - padding_offset / 2
                                         else:
-                                            tiled_feed_dict[key] = value
+                                            feed_dict[h_start] = np.array([- padding_offset / 2])
+                                            feed_dict[w_start] = np.array([- padding_offset / 2])
+                                    if output_ground is not None:
+                                        feed_dict[output_pl] = output_ground
+                                    if args.additional_input:
+                                        feed_dict[additional_input_pl] = np.expand_dims(np.expand_dims(read_name(val_add_names[i], True), axis=2), axis=0)
+
+
+                            #output_buffer = numpy.zeros(output_ground.shape)
+                            if not args.train_temporal_seq:
+                                output_buffer = np.zeros([1, args.input_h, args.input_w, output_nc])
+                            else:
+                                output_buffer = np.zeros([1, args.input_h, args.input_w, output_nc*(args.inference_seq_len - args.nframes_temporal_gen + 1)])
+
+                            st = time.time()
+                            if args.tiled_training:
+                                assert not args.use_queue
+                                st_sum = 0
+                                timeline_sum = 0
+                                l2_loss_val = 0
+                                grad_loss_val = 0
+                                perceptual_loss_val = 0
+                                output_patch = numpy.zeros((1, int(height/ntiles_h), int(width/ntiles_w), 3))
+                                if not args.mean_estimator:
+                                    feed_dict[feed_samples[0]] = numpy.random.normal(size=(1, height+padding_offset, width+padding_offset))
+                                    feed_dict[feed_samples[1]] = numpy.random.normal(size=(1, height+padding_offset, width+padding_offset))
+                                else:
+                                    feed_dict[feed_samples[0]] = numpy.random.normal(size=(args.estimator_samples, height+padding_offset, width+padding_offset))
+                                    feed_dict[feed_samples[1]] = numpy.random.normal(size=(args.estimator_samples, height+padding_offset, width+padding_offset))
+                                for tile_h in range(int(ntiles_h)):
+                                    for tile_w in range(int(ntiles_w)):
+                                        tiled_feed_dict = {}
+                                        tiled_feed_dict[h_start] = np.array([tile_h * height / ntiles_h - padding_offset / 2])
+                                        tiled_feed_dict[w_start] = np.array([tile_w * width / ntiles_w - padding_offset / 2])
+                                        for key, value in feed_dict.items():
+                                            if isinstance(value, numpy.ndarray) and len(value.shape) >= 3 and value.shape[1] == height and value.shape[2] == width:
+                                                if len(value.shape) == 3:
+                                                    tiled_value = value[:, int(tile_h*height/ntiles_h):int((tile_h+1)*height/ntiles_h), int(tile_w*width/ntiles_w):int((tile_w+1)*width/ntiles_w)]
+                                                else:
+                                                    tiled_value = value[:, int(tile_h*height/ntiles_h):int((tile_h+1)*height/ntiles_h), int(tile_w*width/ntiles_w):int((tile_w+1)*width/ntiles_w), :]
+                                                tiled_feed_dict[key] = tiled_value
+                                            else:
+                                                tiled_feed_dict[key] = value
+                                        st_before = time.time()
+                                        if not args.accurate_timing:
+                                            output_patch, l2_loss_patch, grad_loss_patch, perceptual_patch = sess.run([network, loss_l2, loss_add_term, perceptual_loss_add], feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
+                                            st_after = time.time()
+                                        else:
+                                            sess.run([network], feed_dict=feed_dict)
+                                            st_after = time.time()
+                                            output_patch, l2_loss_patch, grad_loss_patch, perceptual_patch = sess.run([network, loss_l2, loss_add_term, perceptual_loss_add], feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
+                                        st_sum += (st_after - st_before)
+                                        print(st_after - st_before)
+                                        output_buffer[0, int(tile_h*height/ntiles_h):int((tile_h+1)*height/ntiles_h), int(tile_w*width/ntiles_w):int((tile_w+1)*width/ntiles_w), :] = output_patch[0, :, :, :]
+                                        l2_loss_val += l2_loss_patch
+                                        grad_loss_val += grad_loss_patch
+                                        perceptual_loss_val += perceptual_patch
+                                        if args.generate_timeline:
+                                            if i > nburns:
+                                                fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+                                                #print("trace fetched")
+                                                chrome_trace = fetched_timeline.generate_chrome_trace_format()
+                                                #print("chrome trace generated")
+                                                timeline_data = json.loads(chrome_trace)['traceEvents']
+                                                timeline_sum += read_timeline.read_time_dur(timeline_data)
+                                                if i == time_vals.shape[0] - 1:
+                                                    with open("%s/nn_%d_%d_%d.json"%(debug_dir, i+1, tile_w, tile_h), 'w') as f:
+                                                        f.write(chrome_trace)
+                                                #print("trace written")
+                                print("timeline estimate:", timeline_sum)
+                                output_image = output_buffer
+                                if args.mean_estimator:
+                                    output_image = output_image[:, :, :, ::-1]
+                                l2_loss_val /= (ntiles_w * ntiles_h)
+                                grad_loss_val /= (ntiles_w * ntiles_h)
+                                perceptual_loss_val /=  (ntiles_w * ntiles_h)
+                                print("rough time estimate:", st_sum)
+
+                            elif args.train_temporal_seq:
+                                output_grounds = []
+                                all_previous_inputs = []
+                                previous_buffer[:] = 0.0
+                                l2_loss_val = 0.0
+                                perceptual_loss_val = 0.0
+                                st_sum = 0
+
+                                for t_ind in range(args.inference_seq_len):
+                                    if t_ind < args.nframes_temporal_gen - 1 or t_ind == args.inference_seq_len - 1:
+                                        gt_name = os.path.join(args.dataroot, 'test_img/test_ground%d%05d.png' % (t_ind, i))
+                                        output_grounds.append(np.float32(cv2.imread(gt_name, -1)) / 255.0)
+
+                                    if t_ind < args.nframes_temporal_gen - 1:
+                                        all_previous_inputs.append(sess.run(input_label, feed_dict=feed_dict))
+                                        all_previous_inputs.append(output_grounds[-1])
+                                    else:
+                                        actual_ind = t_ind - (args.nframes_temporal_gen - 1)
+                                        for k in range(2*(args.nframes_temporal_gen-1)):
+                                            if k % 2 == 0:
+                                                previous_buffer[:, :, :, 3*k:3*k+3] = all_previous_inputs[k]
+                                            else:
+                                                previous_buffer[0, padding_offset//2:-padding_offset//2, padding_offset//2:-padding_offset//2, 3*k:3*k+3] = all_previous_inputs[k]
+                                        feed_dict[previous_input] = previous_buffer
+
+                                        feed_dict[output] = np.expand_dims(output_grounds[-1], 0)
+
+
+
+                                        for _ in range(args.repeat_timing):
+                                            st_start = time.time()
+                                            if not args.accurate_timing:
+                                                # l2 and perceptual loss os incorrect when it's not the last seq
+                                                generated_output, generated_label, l2_loss_val_single, perceptual_loss_val_single = sess.run([network, input_label, loss_l2, perceptual_loss_add], feed_dict=feed_dict)
+                                                st_end = time.time()
+                                            else:
+                                                sess.run(network, feed_dict=feed_dict)
+                                                st_end = time.time()
+                                                generated_output, generated_label, l2_loss_val_single, perceptual_loss_val_single = sess.run([network, input_label, loss_l2, perceptual_loss_add], feed_dict=feed_dict)
+
+                                            st_sum += st_end - st_start
+
+                                            if args.repeat_timing > 1:
+                                                time_stats[time_count] = st_end - st_start
+                                                time_count += 1
+
+                                        if t_ind == args.inference_seq_len - 1:
+                                            l2_loss_val = l2_loss_val_single
+                                            perceptual_loss_val = perceptual_loss_val_single
+                                        #l2_loss_val += l2_loss_val_single
+                                        #perceptual_loss_val += perceptual_loss_val_single
+                                        all_previous_inputs.append(generated_label)
+                                        all_previous_inputs.append(generated_output[0])
+                                        all_previous_inputs = all_previous_inputs[-2*(args.nframes_temporal_gen-1):]
+
+                                        output_buffer[0, :, :, 3*actual_ind:3*actual_ind+3] = generated_output[:]
+
+                                    feed_dict[shader_time] = feed_dict[shader_time] + 1 / 30
+                                output_image = output_buffer
+                                grad_loss_val = 0.0
+                                #output_ground = np.expand_dims(np.concatenate(output_grounds[args.nframes_temporal_gen-1:], 2), 0)
+
+                            else:
+                                if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
+                                    nruns = args.estimator_samples
+                                elif args.learn_loss_proxy and (not args.proxy_loss_type == 'from_data'):
+                                    nruns = 2
+                                    assert output_nc == 1
+                                    output_images = []
+                                    l2_loss_vals = 0
+                                else:
+                                    nruns = args.repeat_timing
+                                st_sum = 0
+                                timeline_sum = 0
+                                for k in range(nruns):
+                                    if args.learn_loss_proxy and (not args.proxy_loss_type == 'from_data'):
+                                        if k == 0:
+                                            feed_dict[target_pl] = output_ground
+                                        else:
+                                            feed_dict[target_pl] = target_ground
+                                            
+                                    if args.generate_adjacent_seq:
+                                        feed_dict[shader_time] = feed_dict[shader_time] + (args.inference_seq_len - 1) / 30
+
                                     st_before = time.time()
                                     if not args.accurate_timing:
-                                        output_patch, l2_loss_patch, grad_loss_patch, perceptual_patch = sess.run([network, loss_l2, loss_add_term, perceptual_loss_add], feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
+                                        output_image, l2_loss_val, grad_loss_val, perceptual_loss_val, current_ind_val = sess.run([network, loss_l2, loss_add_term, perceptual_loss_add, current_ind], options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
                                         st_after = time.time()
                                     else:
-                                        sess.run([network], feed_dict=feed_dict)
+                                        sess.run(network, feed_dict=feed_dict)
                                         st_after = time.time()
-                                        output_patch, l2_loss_patch, grad_loss_patch, perceptual_patch = sess.run([network, loss_l2, loss_add_term, perceptual_loss_add], feed_dict=tiled_feed_dict, options=run_options, run_metadata=run_metadata)
+                                        output_image, l2_loss_val, grad_loss_val, perceptual_loss_val, current_ind_val = sess.run([network, loss_l2, loss_add_term, perceptual_loss_add, current_ind], options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
+                                    
+                                    if args.generate_adjacent_seq:
+                                        feed_dict[shader_time] = feed_dict[shader_time] - 1 / 30
+                                        prev_frame = sess.run(network, feed_dict=feed_dict)
+                                        output_image = np.concatenate((prev_frame, output_image), 3)
+                                    
                                     st_sum += (st_after - st_before)
-                                    print(st_after - st_before)
-                                    output_buffer[0, int(tile_h*height/ntiles_h):int((tile_h+1)*height/ntiles_h), int(tile_w*width/ntiles_w):int((tile_w+1)*width/ntiles_w), :] = output_patch[0, :, :, :]
-                                    l2_loss_val += l2_loss_patch
-                                    grad_loss_val += grad_loss_patch
-                                    perceptual_loss_val += perceptual_patch
-                                    if args.generate_timeline:
-                                        if i > nburns:
-                                            fetched_timeline = timeline.Timeline(run_metadata.step_stats)
-                                            #print("trace fetched")
-                                            chrome_trace = fetched_timeline.generate_chrome_trace_format()
-                                            #print("chrome trace generated")
-                                            timeline_data = json.loads(chrome_trace)['traceEvents']
-                                            timeline_sum += read_timeline.read_time_dur(timeline_data)
-                                            if i == time_vals.shape[0] - 1:
-                                                with open("%s/nn_%d_%d_%d.json"%(debug_dir, i+1, tile_w, tile_h), 'w') as f:
-                                                    f.write(chrome_trace)
-                                            #print("trace written")
-                            print("timeline estimate:", timeline_sum)
-                            output_image = output_buffer
-                            if args.mean_estimator:
-                                output_image = output_image[:, :, :, ::-1]
-                            l2_loss_val /= (ntiles_w * ntiles_h)
-                            grad_loss_val /= (ntiles_w * ntiles_h)
-                            perceptual_loss_val /=  (ntiles_w * ntiles_h)
-                            print("rough time estimate:", st_sum)
-
-                        elif args.train_temporal_seq:
-                            output_grounds = []
-                            all_previous_inputs = []
-                            previous_buffer[:] = 0.0
-                            l2_loss_val = 0.0
-                            perceptual_loss_val = 0.0
-                            st_sum = 0
-
-                            for t_ind in range(args.inference_seq_len):
-                                if t_ind < args.nframes_temporal_gen - 1 or t_ind == args.inference_seq_len - 1:
-                                    gt_name = os.path.join(args.dataroot, 'test_img/test_ground%d%05d.png' % (t_ind, i))
-                                    output_grounds.append(np.float32(cv2.imread(gt_name, -1)) / 255.0)
-
-                                if t_ind < args.nframes_temporal_gen - 1:
-                                    all_previous_inputs.append(sess.run(input_label, feed_dict=feed_dict))
-                                    all_previous_inputs.append(output_grounds[-1])
-                                else:
-                                    actual_ind = t_ind - (args.nframes_temporal_gen - 1)
-                                    for k in range(2*(args.nframes_temporal_gen-1)):
-                                        if k % 2 == 0:
-                                            previous_buffer[:, :, :, 3*k:3*k+3] = all_previous_inputs[k]
-                                        else:
-                                            previous_buffer[0, padding_offset//2:-padding_offset//2, padding_offset//2:-padding_offset//2, 3*k:3*k+3] = all_previous_inputs[k]
-                                    feed_dict[previous_input] = previous_buffer
-
-                                    feed_dict[output] = np.expand_dims(output_grounds[-1], 0)
-
-
-
-                                    for _ in range(args.repeat_timing):
-                                        st_start = time.time()
-                                        if not args.accurate_timing:
-                                            # l2 and perceptual loss os incorrect when it's not the last seq
-                                            generated_output, generated_label, l2_loss_val_single, perceptual_loss_val_single = sess.run([network, input_label, loss_l2, perceptual_loss_add], feed_dict=feed_dict)
-                                            st_end = time.time()
-                                        else:
-                                            sess.run(network, feed_dict=feed_dict)
-                                            st_end = time.time()
-                                            generated_output, generated_label, l2_loss_val_single, perceptual_loss_val_single = sess.run([network, input_label, loss_l2, perceptual_loss_add], feed_dict=feed_dict)
-
-                                        st_sum += st_end - st_start
-
-                                        if args.repeat_timing > 1:
-                                            time_stats[time_count] = st_end - st_start
-                                            time_count += 1
-
-                                    if t_ind == args.inference_seq_len - 1:
-                                        l2_loss_val = l2_loss_val_single
-                                        perceptual_loss_val = perceptual_loss_val_single
-                                    #l2_loss_val += l2_loss_val_single
-                                    #perceptual_loss_val += perceptual_loss_val_single
-                                    all_previous_inputs.append(generated_label)
-                                    all_previous_inputs.append(generated_output[0])
-                                    all_previous_inputs = all_previous_inputs[-2*(args.nframes_temporal_gen-1):]
-
-                                    output_buffer[0, :, :, 3*actual_ind:3*actual_ind+3] = generated_output[:]
-
-                                feed_dict[shader_time] += 1 / 30
-                            output_image = output_buffer
-                            grad_loss_val = 0.0
-                            #output_ground = np.expand_dims(np.concatenate(output_grounds[args.nframes_temporal_gen-1:], 2), 0)
-
-                        else:
-                            if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
-                                nruns = args.estimator_samples
-                            elif args.learn_loss_proxy and (not args.proxy_loss_type == 'from_data'):
-                                nruns = 2
-                                assert output_nc == 1
-                                output_images = []
-                                l2_loss_vals = 0
-                            else:
-                                nruns = args.repeat_timing
-                            st_sum = 0
-                            timeline_sum = 0
-                            for k in range(nruns):
-                                if args.learn_loss_proxy and (not args.proxy_loss_type == 'from_data'):
-                                    if k == 0:
-                                        feed_dict[target_pl] = output_ground
+                                    if args.repeat_timing > 1:
+                                        time_stats[time_count] = st_after - st_before
+                                        time_count += 1
+                                    if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
+                                        output_buffer += output_image[:, :, :, ::-1]
+                                    if args.learn_loss_proxy and (not args.proxy_loss_type == 'from_data'):
+                                        output_images.append(output_image)
+                                        l2_loss_vals += l2_loss_val
+                                        all_loss_proxy[i, k] = np.mean(output_image)
                                     else:
-                                        feed_dict[target_pl] = target_ground
-
-                                st_before = time.time()
-                                if not args.accurate_timing:
-                                    output_image, l2_loss_val, grad_loss_val, perceptual_loss_val, current_ind_val = sess.run([network, loss_l2, loss_add_term, perceptual_loss_add, current_ind], options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
-                                    st_after = time.time()
-                                else:
-                                    sess.run(network, feed_dict=feed_dict)
-                                    st_after = time.time()
-                                    output_image, l2_loss_val, grad_loss_val, perceptual_loss_val, current_ind_val = sess.run([network, loss_l2, loss_add_term, perceptual_loss_add, current_ind], options=run_options, run_metadata=run_metadata, feed_dict=feed_dict)
-                                st_sum += (st_after - st_before)
-                                if args.repeat_timing > 1:
-                                    time_stats[time_count] = st_after - st_before
-                                    time_count += 1
-                                if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
-                                    output_buffer += output_image[:, :, :, ::-1]
+                                        output_images = [output_image]
+                                st2 = time.time()
                                 if args.learn_loss_proxy and (not args.proxy_loss_type == 'from_data'):
-                                    output_images.append(output_image)
-                                    l2_loss_vals += l2_loss_val
-                                    all_loss_proxy[i, k] = np.mean(output_image)
-                                else:
-                                    output_images = [output_image]
+                                    l2_loss_val = l2_loss_vals / nruns
+                                #print("rough time estimate:", st2 - st)
+                                print(current_ind_val, "rough time estimate:", st_sum)
+
+                                if args.mean_estimator:
+                                    output_image = output_image[:, :, :, ::-1]
+                                #print("output_image swap axis")
+                                if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
+                                    output_buffer /= args.estimator_samples
+                                    output_image[:] = output_buffer[:]
+                                if args.generate_timeline:
+                                    if i > nburns:
+                                        fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+                                        #print("trace fetched")
+                                        chrome_trace = fetched_timeline.generate_chrome_trace_format()
+                                        #print("chrome trace generated")
+                                        timeline_data = json.loads(chrome_trace)['traceEvents']
+                                        timeline_sum += read_timeline.read_time_dur(timeline_data)
+                                        if i == time_vals.shape[0] - 1:
+                                            with open("%s/nn_%d.json"%(debug_dir, i+1), 'w') as f:
+                                                f.write(chrome_trace)
+                                        #print("trace written")
+                                        #print("timeline estimate:", timeline_sum)
                             st2 = time.time()
-                            if args.learn_loss_proxy and (not args.proxy_loss_type == 'from_data'):
-                                l2_loss_val = l2_loss_vals / nruns
-                            #print("rough time estimate:", st2 - st)
-                            print(current_ind_val, "rough time estimate:", st_sum)
+                            #if not args.stratified_sample_higher_res:
+                            if (not args.use_queue) and (not args.train_temporal_seq) and (not args.learn_loss_proxy) and (not args.generate_adjacent_seq):
+                                loss_val = np.mean((output_image - output_ground) ** 2)
+                            else:
+                                loss_val = l2_loss_val
+                            #print("loss", loss_val, l2_loss_val * 255.0 * 255.0)
+                            all_test[i] = loss_val
+                            all_l2[i] = l2_loss_val
+                            all_grad[i] = grad_loss_val
+                            all_perceptual[i] = perceptual_loss_val
+                            
+                            if args.nrepeat > 1:
+                                img_prefix = '%02d_' % repeat
+                            else:
+                                img_prefix = ''
 
-                            if args.mean_estimator:
-                                output_image = output_image[:, :, :, ::-1]
-                            #print("output_image swap axis")
-                            if args.debug_mode and args.mean_estimator and args.mean_estimator_memory_efficient:
-                                output_buffer /= args.estimator_samples
-                                output_image[:] = output_buffer[:]
-                            if args.generate_timeline:
-                                if i > nburns:
-                                    fetched_timeline = timeline.Timeline(run_metadata.step_stats)
-                                    #print("trace fetched")
-                                    chrome_trace = fetched_timeline.generate_chrome_trace_format()
-                                    #print("chrome trace generated")
-                                    timeline_data = json.loads(chrome_trace)['traceEvents']
-                                    timeline_sum += read_timeline.read_time_dur(timeline_data)
-                                    if i == time_vals.shape[0] - 1:
-                                        with open("%s/nn_%d.json"%(debug_dir, i+1), 'w') as f:
-                                            f.write(chrome_trace)
-                                    #print("trace written")
-                                    #print("timeline estimate:", timeline_sum)
-                        st2 = time.time()
-                        #if not args.stratified_sample_higher_res:
-                        if (not args.use_queue) and (not args.train_temporal_seq) and (not args.learn_loss_proxy):
-                            loss_val = np.mean((output_image - output_ground) ** 2)
-                        else:
-                            loss_val = l2_loss_val
-                        #print("loss", loss_val, l2_loss_val * 255.0 * 255.0)
-                        all_test[i] = loss_val
-                        all_l2[i] = l2_loss_val
-                        all_grad[i] = grad_loss_val
-                        all_perceptual[i] = perceptual_loss_val
-
-                        if args.learn_loss_proxy:
-                            for k in range(len(output_images)):
-                                output_image = output_images[k]
+                            if args.learn_loss_proxy:
+                                for k in range(len(output_images)):
+                                    output_image = output_images[k]
+                                    output_image=np.clip(output_image,0.0,1.0)
+                                    output_image *= 255.0
+                                    cv2.imwrite("%s/%s%06d%d.png"%(debug_dir, img_prefix, i+1, k),np.uint8(output_image[0,:,:,:]))
+                            elif output_image.shape[3] == 3:
                                 output_image=np.clip(output_image,0.0,1.0)
                                 output_image *= 255.0
-                                cv2.imwrite("%s/%06d%d.png"%(debug_dir, i+1, k),np.uint8(output_image[0,:,:,:]))
-                        elif output_image.shape[3] == 3:
-                            output_image=np.clip(output_image,0.0,1.0)
-                            output_image *= 255.0
-                            cv2.imwrite("%s/%06d.png"%(debug_dir, i+1),np.uint8(output_image[0,:,:,:]))
-                        else:
-                            assert args.temporal_texture_buffer or args.train_temporal_seq
-                            #assert args.geometry == 'texture_approximate_10f'
-                            if args.temporal_texture_buffer:
-                                assert (output_nc - 4) % 3 == 0
-                                nimages = (output_nc - 4) // 3
+                                cv2.imwrite("%s/%s%06d.png"%(debug_dir, img_prefix, i+1),np.uint8(output_image[0,:,:,:]))
                             else:
-                                assert output_image.shape[3] % 3 == 0
-                                nimages = output_image.shape[3] // 3
-                            output_image[:, :, :, :3*nimages] = np.clip(output_image[:, :, :, :3*nimages],0.0,1.0)
-                            output_image[:, :, :, :3*nimages] *= 255.0
-                            for img_id in range(nimages):
-                                if img_id == nimages - 1:
-                                    cv2.imwrite("%s/%06d%d.png"%(debug_dir, i+1, img_id),np.uint8(output_image[0,:,:,3*img_id:3*img_id+3]))
+                                assert args.temporal_texture_buffer or args.train_temporal_seq or args.generate_adjacent_seq
+                                #assert args.geometry == 'texture_approximate_10f'
+                                if args.temporal_texture_buffer:
+                                    assert (output_nc - 4) % 3 == 0
+                                    nimages = (output_nc - 4) // 3
+                                else:
+                                    assert output_image.shape[3] % 3 == 0
+                                    nimages = output_image.shape[3] // 3
+                                output_image[:, :, :, :3*nimages] = np.clip(output_image[:, :, :, :3*nimages],0.0,1.0)
+                                output_image[:, :, :, :3*nimages] *= 255.0
+                                for img_id in range(nimages):
+                                    if img_id == nimages - 1:
+                                        cv2.imwrite("%s/%s%06d%d.png"%(debug_dir, img_prefix, i+1, img_id),np.uint8(output_image[0,:,:,3*img_id:3*img_id+3]))
+                                        
+                                        if args.generate_adjacent_seq:
+                                            cv2.imwrite("%s/%s%06d%d.png"%(debug_dir, img_prefix, i+1, img_id-1), np.uint8(output_image[0,:,:,3*(img_id-1):3*(img_id-1)+3]))
 
-                        python_time[i] = st_sum
-                        if args.generate_timeline:
-                            timeline_time[i-nburns] = timeline_sum
-                        #print("output_image written")
+                            python_time[i] = st_sum
+                            if args.generate_timeline:
+                                timeline_time[i-nburns] = timeline_sum
+                            #print("output_image written")
 
                     if args.repeat_timing > 1:
                         time_stats = time_stats[nburns:]
